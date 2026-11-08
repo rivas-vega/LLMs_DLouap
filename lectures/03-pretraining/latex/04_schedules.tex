@@ -1,0 +1,68 @@
+\chapter{Learning-rate schedules and reusable runs}
+\source{P1:36--43}
+\section{Why warm up and why cool down?}
+Warmup limits early updates while optimizer statistics and internal activation scales settle. Adam's bias correction removes a particular initialization bias; it does not remove uncertainty in early statistics or guarantee stability of the network. Starting with a smaller learning rate is usually cheap relative to a long run.
+
+Cooldown reduces the size of stochastic updates near the end. A useful local model is a quadratic loss with noisy gradients:
+\begin{equation}
+ \loss(w)=\tfrac12h(w-w_*)^2,\quad
+ w_{t+1}-w_*=(1-\eta h)(w_t-w_*)-\eta\xi_t,
+\end{equation}
+where $\E\xi_t=0$ and $\E\xi_t^2=\sigma^2$. For $0<\eta h<2$, the stationary variance is
+\begin{equation}
+ \operatorname{Var}(w-w_*)=\frac{\eta^2\sigma^2}{1-(1-\eta h)^2}
+ \simeq\frac{\eta\sigma^2}{2h}.
+\end{equation}
+Smaller steps can reduce a noise floor. This calculation is an explanatory SGD toy model, not a proof of WSD's behavior in a transformer. It also clarifies the role of sharpness: high curvature limits stable step size. A sharp region does not, by itself, justify a larger step, even if its gradient is large.
+
+\section{Cosine with warmup}
+Let $S$ be the intended number of optimizer steps, $W$ the warmup length, $\eta_{\max}$ the peak rate, and $r$ the final-to-peak ratio. A continuous convention is
+\begin{equation}
+ \eta(t)=\begin{cases}
+ \eta_{\max}t/W,&0\leq t<W,\\
+ \eta_{\max}\left[r+\dfrac{1-r}{2}\left(1+\cos\!\left(\pi\dfrac{t-W}{S-W}\right)\right)\right],&W\leq t\leq S.
+ \end{cases}
+\end{equation}
+The implementation in P1:37 decays to 10\% of the peak learning rate. Discrete code must decide whether the first optimizer step is indexed by 0 or 1, and should check the actual first and last learning rates. A schedule defined in games or tokens must be converted consistently when batch size changes.
+\figpair{cosine.png}{wsd.png}{P1:37--38: cosine with warmup (left), and warmup--stable--decay schedules with several endpoints (right). WSD shares a long plateau across run lengths; cosine changes its trajectory when its planned endpoint changes.}{schedule_shapes}{}
+
+\section{Warmup--stable--decay (WSD)}
+With a cooldown occupying a fraction $q$ of the total horizon, a simple WSD schedule is
+\begin{equation}
+ \eta(t)=\begin{cases}
+ \eta_{\max}t/W,&0\leq t<W,\\
+ \eta_{\max},&W\leq t<(1-q)S,\\
+ \eta_{\max}\left[1-(1-r)\dfrac{t-(1-q)S}{qS}\right],&(1-q)S\leq t\leq S.
+ \end{cases}
+\end{equation}
+Assume $W<(1-q)S$. This schedule uses linear decay, although other decay shapes are possible. In Exercise 2, the warmup is 10,000 games and the cooldown is 20\% of the chosen horizon.
+
+The main advantage is flexibility. If the training horizon changes, a plateau checkpoint remains useful as a branching point. A cosine run stopped halfway has not followed the cosine schedule that would have been chosen for that shorter horizon. WSD does not magically finish with no extra compute: a proper branch still needs its cooldown budget. If an endpoint is $G$ games and cooldown is 20\%, branch at $0.8G$ and use another $0.2G$ games.
+
+\section{Exercise 2: what the curves actually establish}
+Compare a width-128 base model at 500,000 and one million games. The long cosine run and long WSD run both finish at validation loss 1.283 in the displayed experiment. At 500,000 games, the planned cosine run finishes at 1.359 and the WSD branch at 1.355. These printed results support comparable performance in this setup. The 0.004 difference is not evidence of a general ranking without repetitions and uncertainty estimates.
+\fig[0.94]{schedules.png}{P1:41: schedule values above, training-loss traces below, final validation losses in the legend. The orange plateau appears worse than the blue cosine curve during much of training, but cooldown closes the gap. The highlighted midpoint of the long cosine run is not a properly completed short run.}{schedules}
+
+The key comparison is between \emph{completed schedules at the same endpoint}. Comparing an uncooled plateau model with a cooled model confounds optimization progress with the schedule phase. Likewise, one should not select the peak learning rate from the lowest plateau loss when the intended metric is loss after cooldown.
+
+\section{Branching turns one long trajectory into several experiments}
+P1:42 shows a 3.2-million-game run with several checkpoint branches. Each branch is cooled down to a specified endpoint. The displayed final validation losses are:
+\begin{center}
+\begin{tabular}{rrrrrr}\toprule
+100k & 200k & 400k & 800k & 1.6M & 3.2M\\\midrule
+1.761 & 1.553 & 1.406 & 1.317 & 1.259 & 1.203\\\bottomrule
+\end{tabular}
+\end{center}
+These values are for the illustrated peak rate $0.004$, not the best rate at every horizon. A later experiment retunes the peak rate separately.
+\fig[0.92]{branches.png}{P1:42 (repeated on P1:61): a shared WSD trunk and its cooldown branches. The horizontal axis is logarithmic in games seen. The benefit of cooldown grows at the longer endpoints in this example, even when the plateau training loss has slowed.}{branches}
+
+To see the compute saving, consider horizons $G,2G,4G,\ldots,G_{\max}$ and cooldown fraction $q$. Independent runs cost nearly $2G_{\max}$ games in total. A shared trunk reaching $(1-q)G_{\max}$ plus all decays costs approximately $(1-q)G_{\max}+2qG_{\max}=(1+q)G_{\max}$. With $q=0.2$, this is about 60\% of the independent-run cost, ignoring warmup details and finite-series endpoints.
+
+The endpoints are statistically correlated because they share parameters and data history. They are not independent random seeds. This matters when fitting a scaling law or estimating uncertainty from branched trajectories.
+
+\section{Alternatives and the scope of the result}
+\fig[0.88]{deepseek_schedule.png}{The DeepSeek LLM schedule comparison reproduced on P1:43. Stepwise schedules are another way to reserve substantial learning-rate reduction for late training. The model and dataset differ from the chess experiment.}{deepseek_schedule}
+DeepSeek LLM~\cite{deepseekllm} studies stepped schedules and joint scaling of learning rate and batch size. Cosine decay is a convention that can be tested, not a mathematical requirement. Schedule comparisons must match token budget, warmup definition, final rate, and the amount of tuning given to each family.
+
+\takeaway{Cooldown is part of the experiment. WSD's value is both optimization performance and experimental reuse: it allows multiple properly finished endpoints to share a common training trunk.}
+\FloatBarrier

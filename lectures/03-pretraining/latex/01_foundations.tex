@@ -1,0 +1,82 @@
+\chapter{The pretraining problem and the chess laboratory}
+\source{P1:1--15}
+\section{What pretraining produces}
+Pretraining learns a probability distribution over token sequences. For a sequence $x_{1:T}$, an autoregressive model factorizes the joint probability as
+\begin{equation}
+ p_\theta(x_{1:T})=\prod_{t=1}^{T}p_\theta(x_t\mid x_{<t}).
+\end{equation}
+The usual objective is the mean negative log-likelihood over valid prediction targets:
+\begin{equation}\label{eq:nll}
+ \loss(\theta)=-\frac{1}{M}\sum_{i,t}m_{i,t}\log p_\theta(x_{i,t}\mid x_{i,<t}),
+ \qquad M=\sum_{i,t}m_{i,t},
+\end{equation}
+where $m_{i,t}=0$ for ignored positions, such as padding, and $1$ for valid targets. With natural logarithms, loss is measured in nats per token and perplexity is $\exp(\loss)$. A uniform predictor over $V$ tokens has loss $\log V$; for a 67-token vocabulary this is about $4.20$.
+
+The result is a \emph{base model}: a model trained to continue the training distribution. Following instructions, choosing a conversational style, and optimizing preferences are subsequent objectives. A strong base model need not answer an arbitrary question in chat format. Conversely, a fluent instruction-tuned model does not make the pretraining objective irrelevant: post-training depends on capabilities acquired earlier.
+
+Next-token loss is the immediate optimization target. A fixed held-out loss is an inexpensive, smooth diagnostic when comparing training choices on the same distribution. It is not a complete measure of usefulness. Changing the corpus changes what a given loss means, making downstream evaluation necessary when comparing datasets.
+
+\section{Resources and choices form a coupled problem}
+The model lifecycle has at least three cost centers: pretraining, post-training, and inference. Their relative cost varies by project. A heavily used model can consume more inference compute over its lifetime than it consumed in pretraining; this changes the preferred model size. Actual costs depend on the model, hardware, training recipe, and deployment workload.
+
+Before a large run, one must decide architecture, parameter count, initialization, context length, optimizer, learning rate, batch size, schedule, and data mixture. These choices interact. A wider network changes both the optimization dynamics and the efficiency of its matrix multiplications. Longer contexts change memory and attention costs. A better corpus can alter the optimal amount of data. An \emph{ablation} isolates a particular decision sufficiently to establish what caused a performance change.
+
+Developing a pretraining recipe requires a budget for debugging, failed runs, and ablations in addition to the final run. The Smol Training Playbook~\cite{smol} documents these costs for SmolLM3, a 3B model trained on 11T tokens. Figure~\ref{fig:cost} illustrates how substantial this overhead can be.
+\fig[0.87]{training_cost.png}{The cost table reproduced in P1:10: 276,480 GPU-hours for the main run, versus 437,760 GPU-hours including ablations and resets/debugging. The development overhead is about 58\% of the main-run cost. This is a particular project's accounting, not a universal multiplier.}{cost}
+
+\section{Anatomy and approximate parameter count}
+Let $d$ denote model width, $L$ the number of layers, $H$ the number of attention heads, $a=d/H$ the per-head dimension, $F$ the MLP hidden width, and $V$ vocabulary size. In a standard multi-head attention block, the query, key, value, and output projections contribute approximately $4d^2$ weights. A two-matrix MLP with $F=4d$ contributes $2dF=8d^2$. Thus
+\begin{equation}\label{eq:parameters}
+ N_{\mathrm{blocks}}\simeq L(4d^2+8d^2)=12Ld^2.
+\end{equation}
+For SwiGLU, three matrices replace two:
+\begin{equation}
+ \operatorname{MLP}(x)=W_{\rm down}\bigl[\operatorname{SiLU}(W_{\rm gate}x)\odot W_{\rm up}x\bigr].
+\end{equation}
+Choosing $F\simeq 8d/3$ keeps $3dF\simeq8d^2$, preserving the leading parameter estimate. Implementation-friendly rounding changes the exact count. Normalization gains contribute only $O(Ld)$ terms. Input embeddings add $Vd$ weights; an untied output projection adds another $Vd$. A lookup embedding has different compute from a dense output projection, so ``parameters used for FLOP counting'' and ``all stored parameters'' must be distinguished.
+\fig[0.80]{transformer.png}{The transformer anatomy used on P1:9. Its accounting makes the $d^2$ terms visible. The approximation $12Ld^2$ assumes ordinary multi-head attention and an appropriately sized MLP; grouped-query attention and mixture-of-experts architectures change the count.}{transformer}
+
+Grouped-query attention shares key/value heads among several query heads. If $H_{\rm kv}$ is the number of key/value heads, the attention projections contain approximately $2d^2+2dH_{\rm kv}a$ weights. Mixture-of-experts models distinguish total parameters from the subset active for each token. These differences become crucial when estimating training cost from $N$.
+
+The heuristic $d/L\sim100$ on the slide is a broad design reference, not a requirement. Two models with the same $12Ld^2$ can have different latency and memory behavior: depth creates sequential dependencies, whereas width produces larger matrix multiplications. The chess model intentionally uses a small fixed depth and does not follow that aspect ratio.
+
+\section{Why chess is a useful laboratory}
+Sequences of chess moves provide a low-cost language-modeling problem. Moves are represented by origin and destination squares, such as \texttt{e2 e4 e7 e5}, rather than by a large natural-language vocabulary. The vocabulary contains approximately 64 square tokens plus three special tokens (P1:11). Its exact tokenizer specification is not provided here, so the treatment of promotions and special-token identities should be checked in the original code before reproduction.
+
+This setting has abundant sequential data, long-range dependencies, a compact vocabulary, and a meaningful next-token loss. It permits many controlled experiments without a large GPU cluster. The training code can remain chess-agnostic: it receives integer sequences, applies causal attention, and minimizes cross-entropy. The model does not receive an explicit board-state transition engine.
+
+\fig[0.43]{chess_board.png}{The chess illustration from P1:11. The model is trained on the move sequence, not on this rendered board image; the board makes the sequential task interpretable to the reader.}{chess-board}
+
+\begin{table}[htbp]\centering
+\caption{The base chess configuration (P1:13).}
+\begin{tabular}{ll}\toprule
+Quantity & Setting\\\midrule
+Width $d$ & 128\\
+Depth $L$ & 4\\
+Head dimension $a$ & 32, hence 4 heads\\
+Normalization & RMSNorm\\
+MLP & SwiGLU, hidden width approximately $8d/3$\\
+Position representation & Rotary position embeddings (RoPE)\\
+Stored sequence length & 256 tokens\\
+Dominant parameter count & $12\times4\times128^2=786{,}432$\\\bottomrule
+\end{tabular}
+\end{table}
+
+The base configuration processes about 100,000 games per minute on the experimental hardware (P1:13), making sweeps affordable. This runtime depends on the hardware and implementation. A 50,000-game held-out set is used in the learning-rate exercise. The training data are described as shuffled games, making initialization and data-order seeds separate experimental variables.
+
+\fig{chess_split.png}{P1:12: the dataset split. The source pool has 10,239,287 training games, a later 50,000-game validation set, and a separate 298,826-game strong-player split. Temporal separation and rating-based evaluation answer different generalization questions.}{chess-split}
+
+\section{Three token counts that must not be confused}\label{sec:tokens}
+Games contain approximately 135 real tokens on average and are padded to length 256. For $G$ games,
+\begin{equation}
+ D_{\rm slots}=256G,\qquad D_{\rm real}\simeq135G,\qquad
+ D_{\rm targets}=\sum_{i,t}m_{i,t}.
+\end{equation}
+The last quantity can differ slightly from $D_{\rm real}$ because of sequence shifting and special tokens. For 100,000 games, these are about 25.6 million stored positions and 13.5 million real tokens. Both ``25M tokens'' and ``13M tokens'' can therefore describe the same experiment under different counting conventions.
+
+Ignoring PAD in the loss prevents learning to predict padding. It does \emph{not} automatically eliminate matrix multiplication at padded positions. Dense padded execution can therefore process almost twice as many positions as contribute to the loss. A causal mask prevents looking ahead; a loss mask controls which targets count; efficient sequence packing controls wasted computation. These are three different mechanisms.
+
+The chess scaling tables use approximately 135 tokens per game. Their $C=6ND$ labels should be read consistently with that convention. Unless the implementation avoids padded computation, these labels are useful nominal budgets rather than exact executed hardware FLOPs. This distinction does not invalidate comparisons within a fixed-padding experiment, but it matters for MFU and cross-dataset comparisons.
+
+\takeaway{The chess experiments are a laboratory for training methodology. Their numerical learning rates, token ratios, and losses are specific to the tokenizer, architecture, optimizer, data, and accounting convention. The transferable object is the experimental procedure.}
+\FloatBarrier

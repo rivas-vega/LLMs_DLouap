@@ -1,0 +1,145 @@
+\chapter{Compute-optimal scaling and a prediction tested}
+\label{ch:scaling}
+\source{P1:74--90}
+
+\section{What should we do with more compute?}
+If a training budget doubles, one can train the same model twice as long, double the model size for the same number of tokens, or increase both by intermediate factors. All three choices have approximately the same dense-model training cost $C=6ND$. They need not produce the same loss.
+
+The historical studies by Kaplan et al.~\cite{kaplan} and Hoffmann et al.~\cite{chinchilla} investigate this allocation problem. The first finds a strong preference for increasing model size, approximately $N\propto C^{0.73}$ and $D\propto C^{0.27}$ in its setting. Chinchilla revises the balance toward approximately equal exponents. The distinction is about a \emph{training procedure plus model family plus data distribution}, not an immutable property of transformers.
+
+\fig{chinchilla_envelope.png}{P1:76: training-loss trajectories and their efficient envelope. At a fixed compute value, the relevant comparison is vertical: which model and training duration produce the lowest loss?}{chinchilla-envelope}
+
+\section{Chinchilla's approximately balanced rule}
+The Chinchilla study trains more than 400 models, spanning roughly 70 million to 16 billion parameters and 5 to 500 billion training tokens. Several estimation methods point toward scaling model size and data approximately together. Its celebrated practical summary is
+\begin{equation}
+ N^*(C)\propto C^{1/2},\qquad D^*(C)\propto C^{1/2},
+ \qquad D^*\approx20N^*.
+\label{eq:chinchilla}
+\end{equation}
+The resulting 70-billion-parameter Chinchilla model is trained on 1.4 trillion tokens. The conclusion is that many contemporary large models had used too few tokens relative to their size for their training budgets.
+
+\figstack{chinchilla_optima.png}{chinchilla_table.png}{P1:77--78: fitted compute-optimal scaling and the historical parameter/token comparison. The ratio of 20 is an approximate recipe from a particular study, not a universal stopping criterion.}{chinchilla-optima}{}
+
+Training a fixed model for 30 rather than 20 tokens per parameter does not become harmful simply because it crosses 20. The statement is that, for a fixed \emph{total training compute}, another allocation between model size and tokens may be more efficient. With fresh useful data and stable optimization, extra training generally continues to help that fixed model, although gains diminish. Data repetition, distribution shifts, and overfitting can complicate that expectation.
+
+\subsection{A concrete allocation example}
+Suppose $C=6\times10^{21}$ FLOPs and adopt $D=20N$ as a planning approximation. Then
+\[
+ C=120N^2,\quad N=\sqrt{C/120}\simeq7.07\times10^9,
+ \quad D\simeq1.41\times10^{11}.
+\]
+Four times the compute permits roughly twice the parameters and twice the tokens. These are allocation calculations, not a claim that this exact model will achieve a specified downstream score.
+
+\section{IsoFLOP curves and a loss surface}
+An \emph{isoFLOP} comparison fixes $C$ and varies $N$, setting $D=C/(6N)$. Very small models have many training tokens but insufficient capacity; very large models have capacity but too little training. A well-designed sweep often produces a U-shaped curve in log model size.
+
+\fig{chinchilla_isoflops.png}{P1:79: isoFLOP curves. Each curve compares models trained with the same approximate compute. The minimum shifts toward larger models as the budget increases.}{chinchilla-isoflops}
+
+A common phenomenological model is
+\begin{equation}
+\loss(N,D)=E+\frac{A}{N^\alpha}+\frac{B}{D^\beta},
+\qquad A,B,\alpha,\beta>0.
+\label{eq:loss-surface}
+\end{equation}
+The first reducible term represents the limitation associated with model size; the second represents the limitation associated with training data. $E$ is a fitted floor. Under an idealized correctly specified next-token model it is related to the entropy rate of the data source. In an empirical finite-range fit, however, $E$ can absorb model mismatch and fitting error. It is not a direct measurement of a universal ``entropy of language.'' It also depends on tokenization and the evaluation distribution.
+
+\figpair{chinchilla_contours.png}{chinchilla_slices.png}{P1:80: two views of the fitted loss surface. Contours describe equally good parameter/data combinations; fixed-compute slices identify the best allocation at each budget.}{chinchilla-surface}{}
+
+\subsection{Deriving the optimal exponents}
+Substitute $D=C/(6N)$ into Equation~\eqref{eq:loss-surface}:
+\[
+\loss(N;C)=E+AN^{-\alpha}+B\left(\frac{6N}{C}\right)^\beta.
+\]
+At the optimum, differentiating with respect to $N$ gives
+\[
+\alpha A N^{-\alpha}=\beta B D^{-\beta}.
+\]
+Hence
+\begin{align}
+N^*(C)&=\left(\frac{\alpha A}{\beta B\,6^\beta}\right)^{\!1/(\alpha+\beta)}
+ C^{\beta/(\alpha+\beta)},\\
+D^*(C)&=\frac{C}{6N^*(C)}\propto C^{\alpha/(\alpha+\beta)}.
+\label{eq:optimal-exponents}
+\end{align}
+Equal compute exponents follow when $\alpha\approx\beta$. A constant token-to-parameter ratio follows only when the exponents are equal; its value also depends on $A$ and $B$. The minimized reducible loss scales as $C^{-\alpha\beta/(\alpha+\beta)}$ in this idealized model.
+
+\section{Why careful tuning changes a scaling law}
+The discrepancy study by Porian et al.~\cite{discrepancy} revisits the Kaplan--Chinchilla disagreement with more than 900 runs. It identifies important effects from counting the output-head compute, choosing an appropriate warmup duration, and tuning optimizer parameters across scales. An apparent model-size penalty can partly be an optimization penalty.
+
+Before a large scaling sweep, establish a usable batch size, a learning-rate versus horizon rule, and width transfer. Otherwise, larger or longer runs might be systematically mistuned, and a fit would confidently extrapolate that mistake.
+
+\fig{marin_forecast.png}{P1:81: Marin forecasts extrapolated from smaller runs. Forecasting beyond the fitted range tests the combined scaling model and training recipe.}{marin-forecast}
+
+The Marin report~\cite{marinscale} describes preregistered predictions extending about 300 times beyond the fitted compute range. Its relevance here is methodological: declare the recipe and prediction before observing the expensive result. Accurate interpolation on existing measurements is a weaker test than a successful prospective prediction.
+
+\section{Training-optimal is not lifetime-cost-optimal}
+For a heavily used model, deployment compute can exceed pretraining compute. Minimizing combined training and deployment cost can therefore favor a smaller model trained for substantially more than the Chinchilla token ratio. ``Overtraining'' in this usage means training beyond the training-compute optimum for its size; it does not necessarily mean statistical overfitting.
+
+\extension{A simplified lifetime-cost model is
+\[
+ C_{\rm total}\approx6ND+\kappa NQ,
+\]
+where $Q$ is the number of served tokens and $\kappa$ summarizes inference cost per parameter per token. It omits attention-cache costs, batching, communication, and latency constraints. At a target quality, spending more training compute on a smaller model may save $\kappa\Delta NQ$ during serving. As $Q$ grows, that saving becomes more important. There is consequently no deployment-independent optimal token-to-parameter ratio.}
+
+\section{The chess scaling experiment}
+\subsection{The experimental design}
+The small chess setting makes the full scaling methodology testable on accessible hardware. The reported initial sweep took roughly one night on the experimental setup; its runtime is hardware-dependent. The design has 18 runs across four approximate compute budgets:
+\[
+C\in\{3\times10^{14},\;10^{15},\;3\times10^{15},\;10^{16}\}\ \text{FLOPs}.
+\]
+Depth remains four, widths range approximately from 96 to 512, and batch size is 128. WSD supplies comparable cooldown endpoints. Width uses the transfer recipe, while the base learning rate follows
+\begin{equation}
+\eta_{\rm base}=0.0113\left(\frac{G}{100{,}000}\right)^{-0.357}.
+\label{eq:scaling-recipe}
+\end{equation}
+
+\fig{chess_run_table.png}{P1:84: the actual run grid. Its purpose is to compare different parameter/data allocations within each budget after transferring the optimization recipe.}{chess-run-grid}
+
+\subsection{Fitting each fixed-budget minimum}
+\fig{chess_isoflops.png}{P1:85: chess isoFLOP curves and local fits. The curves reproduce the qualitative tradeoff found in language modeling, despite the very different token distribution.}{chess-isoflops}
+
+A useful local approximation is a quadratic in $\log N$ near each minimum. It is an interpolation device, not a replacement for the full loss surface. A minimum at the boundary of the tested sizes is not well determined; the sweep should extend past it on both sides.
+
+P1:86 also includes a learning-rate check. Multiplying the transferred rate by two improves some runs, while halving it often hurts. For example, at width 256 and about 390,000 games the displayed losses are 1.2865, 1.2556, and 1.2448 for factors $0.5$, $1$, and $2$. Thus the transferred recipe is useful but not exactly optimal at every point.
+
+\figstack{lr_check_table.png}{lr_check.png}{P1:86: sensitivity to a factor-of-two change in learning rate. Residual tuning error is one reason not to treat the fitted scaling coefficients as exact constants.}{scaling-lr-check}{}
+
+\subsection{The resulting allocation rule}
+\fig{chess_optima.png}{P1:87: fitted optimal size and token count for chess. The displayed exponents are about 0.51 and 0.49, and the optimum is around 65 real tokens per parameter in this setting.}{chess-optima}
+
+\begin{table}[htbp]
+\centering\small
+\begin{tabular}{rrrrr}
+\toprule
+Compute (FLOPs)&Parameters&Width&Games&Tokens/parameter\\
+\midrule
+$3\times10^{14}$&0.86 M&134&431,000&68\\
+$10^{15}$&1.59 M&182&776,000&66\\
+$3\times10^{15}$&2.79 M&241&1,328,000&64\\
+$10^{16}$&5.15 M&328&2,392,000&63\\
+\bottomrule
+\end{tabular}
+\caption{Rounded fitted optima from P1:87. The parameter and game counts are interpolated recommendations, not necessarily individual runs in the sweep.}
+\end{table}
+
+These scaling estimates use approximately 135 real tokens per game. The sequences are padded to 256 positions. If an implementation computes densely through all padding positions, the physical FLOPs are higher than the $6N D_{\rm real}$ labels. The consistent interpretation is a real-token-based proxy budget, not a hardware measurement. This distinction affects absolute budgets, while a constant padding fraction need not change the fitted exponents.
+
+\subsection{The loss fit and its limits}
+The formula visible on P1:88 is
+\begin{equation}
+\loss(N,D)\simeq0.66+\frac{32}{N^{0.32}}+\frac{469}{D^{0.41}}.
+\label{eq:chess-loss}
+\end{equation}
+Here $N$ and $D$ are counts, not values in millions. The supplied PDF contains no visible plot underneath this formula. The formula is therefore analyzed directly; no reconstructed plot is presented as an original slide figure.
+
+The rounded exponents in Equation~\eqref{eq:chess-loss} imply, by Equation~\eqref{eq:optimal-exponents}, $N^*\propto C^{0.41/0.73}\simeq C^{0.562}$ and $D^*\propto C^{0.438}$. These are not exactly the separately fitted isoFLOP exponents 0.51 and 0.49. Different fitting methods, limited data, and rounding can produce different estimates. The robust conclusion is an approximately balanced tradeoff, not numerical identity among all fits.
+
+\subsection{The larger run: a prospective check}
+The larger validation run uses approximately $10^{17}$ FLOPs, width 576 (about 16 million parameters), and about 7.7 million games. An H100 accelerates this run. Most tuning experiments had used models below one million parameters.
+
+\fig{chess_big_run.png}{P1:90: the larger chess run and its forecast. The predicted loss is 0.916 and the measured validation loss is 0.904. The final WSD cooldown produces the visible late improvement.}{chess-big-run}
+
+The difference is about $-0.012$ nats per token: the observed loss is slightly better than predicted. This is persuasive evidence that the small experiments captured useful structure. It is not proof that the same exponent, token ratio, or error bound will hold for a new architecture or natural-language dataset. The printed prediction may also use unrounded fit coefficients; it should not be expected to match every calculation made from the rounded equation exactly.
+
+\takeaway{Scaling laws make expensive training a testable forecast. Their reliability depends on consistent token accounting, well-tuned comparison runs, uncertainty near the minima, and validation outside the fitting range.}
+\FloatBarrier

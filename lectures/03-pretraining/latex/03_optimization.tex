@@ -1,0 +1,99 @@
+\chapter{Optimization: AdamW and its timescales}
+\source{P1:18, 30--36}
+\section{From stochastic gradient descent to Adam}
+For a minibatch loss $\loss_t$, write $g_t=\nabla_\theta\loss_t(\theta_t)$. SGD updates $\theta_{t+1}=\theta_t-\eta_tg_t$. Adam~\cite{adam} instead maintains elementwise exponential moving averages:
+\begin{align}
+ m_t&=\beta_1m_{t-1}+(1-\beta_1)g_t,\\
+ v_t&=\beta_2v_{t-1}+(1-\beta_2)g_t^{\odot2},\\
+ \widehat m_t&=\frac{m_t}{1-\beta_1^t},\qquad
+ \widehat v_t=\frac{v_t}{1-\beta_2^t},\\
+ \theta_{t+1}&=\theta_t-\eta_t\frac{\widehat m_t}{\sqrt{\widehat v_t}+\epsilon}.
+\end{align}
+All divisions and square roots are coordinatewise. The first moment smooths directions; the second estimates the scale of recent squared gradients. $v_t$ is a \emph{second raw moment}, not a variance: a variance would subtract the squared mean. Bias correction compensates for initializing the averages at zero, under the corresponding stationarity interpretation. It does not eliminate noise or make the estimates instantly reliable.
+
+To understand the learning rate, suppose a coordinate has constant nonzero gradient $g$ and $\epsilon\ll|g|$. Then $\widehat m\approx g$, $\widehat v\approx g^2$, and
+\begin{equation}
+ \frac{\widehat m}{\sqrt{\widehat v}+\epsilon}\approx\operatorname{sign}(g),
+ \qquad |\Delta\theta|\approx\eta.
+\end{equation}
+Under these assumptions, Adam's learning rate approximates the magnitude of a per-coordinate displacement. The precise identity underlying this interpretation is $\sqrt{g^2}=|g|$, not $g$. With noisy, changing gradients the normalized update need not equal one. A coordinate with rapidly alternating signs can have small $m$ and appreciable $v$, hence a much smaller net update.
+
+\section{Why weight decay must be decoupled}
+Adding $\lambda\norm{\theta}^2/2$ to the objective produces gradient $g+\lambda\theta$. For ordinary SGD,
+\begin{equation}
+ \theta_{t+1}=\theta_t-\eta_t(g_t+\lambda\theta_t)
+ =(1-\eta_t\lambda)\theta_t-\eta_tg_t.
+\end{equation}
+Thus an $L_2$ penalty is equivalent to multiplicative decay in this setting. For Adam, putting $g+\lambda\theta$ inside the moment estimates changes both $m$ and $v$. The penalty is then transformed by a coordinate-dependent, history-dependent preconditioner. It no longer creates uniform shrinkage of all weights.
+
+AdamW~\cite{adamw} applies the adaptive update to the task gradient and applies shrinkage separately:
+\begin{equation}\boxed{
+ \theta_{t+1}=(1-\eta_t\lambda)\theta_t-
+ \eta_t\frac{\widehat m_t}{\sqrt{\widehat v_t}+\epsilon}.}
+ \label{eq:adamw}
+\end{equation}
+``Decoupled'' means decoupled from adaptive gradient preconditioning. In the common convention used here, decay is still multiplied by the learning rate. Different software conventions can use a coefficient with different semantics; copy an update equation, not just a number named ``weight decay.''
+
+\section{Interpreting the beta parameters}
+Unrolling a moving average gives weights proportional to $(1-\beta)\beta^k$ for a contribution $k$ steps old. Its exact e-folding time is
+\begin{equation}
+ \tau_\beta=-\frac{1}{\log\beta}\simeq\frac{1}{1-\beta}
+ \quad(\beta\text{ close to }1).
+\end{equation}
+After one such timescale, an old contribution has decayed by a factor near $e^{-1}$; it has not vanished completely. An averaging time of ten steps therefore does not mean that the estimate is fully renewed after ten steps.
+
+\begin{table}[htbp]\centering
+\caption{Approximate averaging times in optimizer steps.}
+\begin{tabular}{lll}\toprule
+$\beta$ & $1/(1-\beta)$ & Interpretation\\\midrule
+0.9 & 10 & Relatively rapid first-moment response\\
+0.95 & 20 & Shorter second-moment memory\\
+0.975 & 40 & Both moments in the ML4 example\\
+0.999 & 1,000 & Much longer second-moment memory\\\bottomrule
+\end{tabular}
+\end{table}
+
+A practical starting point for pretraining is $(\beta_1,\beta_2)=(0.9,0.95)$, which uses a shorter second-moment memory than $(0.9,0.999)$. The shorter second-moment memory tracks changing gradient scales more quickly. This is a practical recipe, not a theorem and not a statement that every pretraining run needs the same betas. Mistral Large 4, for example, uses $(0.975,0.975)$~\cite{mistral4}.
+
+The averaging time in \emph{tokens} is about $B_{\rm tok}/(1-\beta)$, so a change in batch size changes the temporal meaning of a fixed beta. To preserve exponential forgetting per token when the batch grows by a factor $k$, a natural relation is $\beta'\approx\beta^k$. This observation explains why batch-size transfer can require optimizer retuning as well as a learning-rate adjustment; it is not a blanket prescription for all settings.
+
+\paragraph{Paper connection: Adam spikes.}
+Bai et al.~\cite{adamspikes} examine an instability that can arise from Adam's adaptive preconditioner itself. When instantaneous squared gradients become small relative to the stored second moment, $v$ can decay while lagging the current dynamics. The effective preconditioned curvature can cross a stability threshold. Their quadratic analysis and network experiments show why constant curvature alone does not exclude an Adam spike. This supports monitoring optimizer state and gradient dynamics, rather than blaming every spike on a bad example. It does not prove that the same mechanism caused each spike in the chess figures.
+
+\section{Weight decay when training for roughly one pass}
+Weight decay can help even when a web-scale model makes only about one pass through a huge corpus. The simple classical story, ``it prevents fitting the same examples too closely,'' is incomplete. Training once does not logically rule out memorization, distributional overfitting, or repeated content within a corpus. It does, however, motivate looking at optimization dynamics in addition to traditional regularization.
+
+Let $q_t=\widehat m_t/(\sqrt{\widehat v_t}+\epsilon)$ and, for $\lambda>0$, define
+\begin{equation}
+ u_t=-q_t/\lambda.
+\end{equation}
+Equation~\eqref{eq:adamw} becomes
+\begin{equation}
+ \theta_{t+1}=(1-\eta_t\lambda)\theta_t+\eta_t\lambda u_t.
+\end{equation}
+For constant $\eta$ and $0<\eta\lambda<1$, this is an EMA toward a moving target $u_t$. The minus sign in the definition of $u_t$ is necessary; a positive definition followed by a plus update would reverse the gradient direction. The decay-memory timescale is
+\begin{equation}\label{eq:wdtime}
+ \tau_{\rm wd}=-\frac{1}{\log(1-\eta\lambda)}\simeq\frac{1}{\eta\lambda}.
+\end{equation}
+For varying learning rates, the old-weight contribution is multiplied by $\prod_t(1-\eta_t\lambda)$, approximately $\exp(-\lambda\sum_t\eta_t)$. Consequently, schedule shape and training length also affect effective forgetting.
+
+\paragraph{Two complementary papers.}
+D'Angelo et al.~\cite{whywd} argue that the benefit of weight decay in modern training can come from its modification of optimization dynamics. Their account distinguishes repeated-pass vision training from nearly single-pass language modeling, where stability and stochastic bias--variance tradeoffs become central. Wang and Aitchison~\cite{wdscale} formalize the EMA view and study how its preferred timescale transfers across dataset and model sizes. Their empirical finding concerns a roughly stable timescale measured in epochs, not a universal optimal value of $\lambda$. Both papers help explain why a useful decay coefficient can remain nonzero without a classical overfitting curve.
+
+\extension{If $D$ is a token horizon and $B_{\rm tok}$ a batch, an epoch-like timescale is $\tau_{\rm epochs}\simeq B_{\rm tok}/(\eta\lambda D)$. Keeping this fixed while changing $D$, $B$, or $\eta$ imposes a joint relation on the hyperparameters. At fixed $D$ and batch, reducing matrix learning rates by a factor $r$ requires increasing decay by $r$ to preserve $\eta\lambda$. This will reappear in the width-transfer discussion.}
+
+The chess code uses decay $0.1$ on matrix weights and excludes one-dimensional normalization gains. This parameter grouping is a convention motivated by their different role, not a mathematical equivalence between ``one-dimensional'' and ``should never be decayed.'' Embeddings and tied weights deserve deliberate treatment in a production implementation.
+
+\section{The training loop and faithful restarts}
+Each optimizer step sets the current learning rate, obtains input/target pairs shifted by one token, computes logits with causal attention, evaluates masked cross-entropy, backpropagates, clips gradients if configured, and updates the model. Gradients must be cleared at the correct accumulation boundary. The code shown uses BF16 autocasting for supported devices and computes the loss from float logits.
+
+Global norm clipping transforms $g$ into
+\begin{equation}
+ \widetilde g=g\min\!\left(1,\frac{c}{\norm{g}_2}\right).
+\end{equation}
+The chess experiments use a clipping threshold near $c=1$. Log the \emph{pre-clipping} norm, otherwise large events are hidden. Clipping a gradient does not directly bound the Adam parameter-update norm because moment history and coordinatewise normalization intervene.
+
+A faithful checkpoint contains weights \emph{and} optimizer state ($m$, $v$, and step count). For reproducible continuation, also preserve schedule progress, data position or sampler state, random-generator states, precision-scaler state if applicable, and configuration. Loading weights alone is a new optimization trajectory, not a faithful resume.
+
+\takeaway{AdamW introduces interacting timescales: moment averaging, decay, warmup, and the total run length. Starting values are useful, but understanding those timescales is what makes transfer and debugging possible.}
+\FloatBarrier

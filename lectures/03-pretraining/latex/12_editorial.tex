@@ -1,0 +1,27 @@
+\chapter{Editorial clarifications and figure provenance}
+\label{app:editorial}
+
+This appendix collects clarifications needed to interpret the equations, experimental results, and cited sources consistently.
+
+\section{Corrections that affect interpretation}
+\begin{description}[style=nextline]
+\item[Tokens, games, and padded positions.]
+The throughput axis on P1:26 is in thousands of tokens per second, not games per second. The 100K-game experiment has about 13.5M real tokens and 25.6M padded positions. These quantities follow the axis labels and exercise specifications.
+\item[Adam's normalized update.]
+For a constant scalar gradient, $\sqrt{g^2}=|g|$, so the normalized direction is a sign, not always $+1$. The decay-as-EMA rewrite needs $u=-q/\lambda$ with the stated plus-sign interpolation. Chapter 3 supplies the corrected algebra.
+\item[Empirical fits are not universal constants.]
+P1:68 prints a width exponent about 1.58, whereas P1:70 shows about 1.34. The separate chess loss-surface exponents imply compute exponents different from the isoFLOP fit. Both discrepancies are retained and explained. A fit to a small number of runs should not be made artificially exact.
+\item[Absent image content.]
+The area below the formula on P1:88 is blank in the supplied file. The formula and its interpretation are included; no reconstructed plot is attributed to the slides.
+\item[Dates and scope of paper claims.]
+The large-batch paper was published in 2018. It includes language-model experiments. The model-collapse warning and the inverse-width intuition are stated with their assumptions rather than promoted to unrestricted theorems.
+\item[Mistral slide shorthand.]
+The report specifies 40M, 80M, and 160M token batches, compared with 50M$\to$160M on the slide. Its 65\%/35\% refers to successive training phases. The 28T-token total remains attributed to P2:32. See Chapter 10 for the source comparison.
+\end{description}
+
+\section{Figure provenance and consolidation}
+All figures labeled with P1 or P2 are crops of the supplied slide PDFs, preserving their plotted data and original labels. Their original research provenance is explained in the surrounding text and bibliography. The same chess anatomy figure appears in both decks and is reproduced once. Repeated sweep panels are consolidated; bibliographic title pages and implementation screenshots are represented by references or equations rather than reproduced as decorative images. The editable source package contains the figure manifest with source-page and crop coordinates.
+
+For completeness, the additional seed-optimum panel and the alternate width fit are retained below. They support the uncertainty discussion rather than adding a new scaling claim.
+\figpair{seed_optima_b.png}{width_fit_alt.png}{Supplementary original panels from P1:51 and P1:70. Seed-dependent optimum estimates and an alternate width fit emphasize the limited precision of a small sweep.}{supplemental-fits}{}
+\FloatBarrier

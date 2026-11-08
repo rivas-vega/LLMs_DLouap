@@ -1,0 +1,88 @@
+\chapter{Learning rate, batch size, and training horizon}
+\label{ch:hyperparameters}
+\source{P1:44--66}
+
+A learning rate is not intrinsically good: it is good for a particular model, optimizer, batch size, data distribution, and number of updates. Vary these ingredients one at a time before combining their effects.
+
+\section{Exercise 3a: find the useful learning-rate range}
+Use the small four-layer chess transformer, a fixed batch size, a WSD schedule, and 100,000 training games. Evaluate on a separate set of 50,000 games. The training input contains 25.6 million padded positions but approximately 13.5 million non-padding tokens. Keep the warmup, cooldown fraction, initialization, and data order fixed for a controlled first comparison.
+
+Sweep the peak learning rate geometrically, for example
+\[
+\eta_k=10^{-3}2^k,
+\]
+then refine the promising interval using factors of $\sqrt{2}$. A logarithmic grid is appropriate because useful learning rates usually span multiplicative ranges. Selecting the best run among many also introduces selection noise, so repeat the promising configurations across seeds.
+
+\fig{lr_sweep.png}{Learning-rate sweep from P1:47. The best region is broad, roughly $0.008$--$0.0226$ in this particular experiment, followed by a sharp deterioration near $0.032$. These values are specific to the model and training horizon.}{lr-sweep}
+
+The low-loss region need not coincide with the fastest early decrease in training loss. Final validation losses in P1:48 are approximately 1.643 at $0.0113$, 1.647 at $0.0226$, 2.434 at $0.032$, and 2.694 at $0.064$. The last two are outside the useful range. The correct response is to inspect the whole trajectory, including gradient norms and the cooldown, rather than to rank runs by their first few updates.
+
+\section{How much should we trust a single run?}
+\figstack{seed_variation.png}{seed_optima_a.png}{Repeated runs, P1:50--51. The upper panels separate sources of variability. The lower plot shows eight seed-dependent learning-rate curves; fitting their nearby minima gives a distribution of optimum estimates.}{seed-variation}{}
+
+There are at least three distinct sources of variation: numerical nondeterminism on the same nominal seed; different initial weights; and different data orders or sampled data. In these measurements, initialization matters much more than the residual variation from rerunning the same seed. Data variation adds another contribution. This is an observation for these experiments, not a universal ordering.
+
+A convenient local model is a quadratic in log learning rate:
+\begin{equation}
+\loss_{\rm val}(\eta)\simeq a\bigl(\log\eta-c\bigr)^2+\loss_{\min},\qquad a>0,
+\label{eq:lr-quadratic}
+\end{equation}
+so the estimated optimum is $\eta^*=e^c$. Fit the best point and its two neighbors. Three points determine a parabola, but do not establish that the curve is quadratic over a wide interval. The fit is especially fragile on a flat bottom or next to a divergence boundary. Repeating the sweep, fitting more nearby points, and reporting an interval of nearly equivalent learning rates are more informative than many digits in $\eta^*$.
+
+\section{Batch size: hardware efficiency versus statistical efficiency}
+The batch size controls how many examples contribute to one update. For independent samples with gradients $g_i$,
+\[
+\bar g_B=\frac1B\sum_{i=1}^{B}g_i,
+\qquad \E[\bar g_B]=g,
+\qquad \operatorname{Cov}(\bar g_B)=\frac{\Sigma}{B}.
+\]
+A larger batch reduces gradient noise. It also performs fewer optimizer updates for the same number of examples. These effects compete. At a fixed data budget, doubling $B$ halves the number of updates; at a fixed step count, it doubles the data budget. The two comparisons answer different questions.
+
+McCandlish et al.~\cite{largebatch} propose a gradient-noise scale as a useful predictor of the largest efficient batch. A simplified expression is
+\begin{equation}
+ B_{\rm noise}=\frac{\operatorname{tr}\Sigma}{\norm{g}^2}.
+\end{equation}
+When the stochastic component dominates, averaging more examples can be valuable. Once it is small relative to the mean direction, further averaging yields diminishing returns. The paper develops more careful curvature-dependent versions and tests the idea across several domains, including language modeling. The paper was published in 2018.
+
+\extension{``Critical batch size'' is an empirical crossover, not a hard mathematical ceiling. It changes during training, depends on the target loss, and interacts with optimizer settings. Correlated examples, variable sequence lengths, and token masking also weaken the simple independent-sample argument.}
+
+\figstack{batch_sweep.png}{batch_steps.png}{Chess batch-size experiment, P1:55--56. Loss must be compared both against examples processed and against optimizer steps. Larger batches can look advantageous on one horizontal axis and inefficient on the other.}{batch-statistics}{}
+
+\section{Exercise 3c: tune batch size and learning rate jointly}
+Sweep batch sizes from 16 to 1024 and retune the learning rate for each one. This is essential: holding the learning rate fixed could make a batch size look poor merely because the associated optimizer setting is inappropriate. At a fixed training budget, very large batches eventually hurt because too few updates remain.
+
+\fig{batch_lr.png}{P1:57: the optimal learning rate initially grows approximately with the square root of batch size, then turns down. A batch size of 128 provides a practical setting below the inefficient large-batch regime in this experiment.}{batch-lr}
+
+The rough rule $\eta\propto\sqrt{B}$ is a local empirical guide here. It is not the same as the often-discussed linear scaling rule for SGD, and neither rule should be applied without its assumptions. A larger batch changes the number of updates per epoch and therefore the interpretation of momentum and weight-decay timescales. For example, a moment horizon of $1/(1-\beta_2)$ updates corresponds to approximately $B/(1-\beta_2)$ examples.
+
+The engineering decision is consequently two-dimensional: select a statistically useful \emph{global} batch, then implement it using a microbatch and accumulation pattern that uses the GPU well. Throughput alone cannot determine the best global batch.
+
+\section{The optimal learning rate depends on the horizon}
+A longer training horizon allows smaller, less noisy updates to accumulate, so the best peak learning rate tends to decrease. Increasing the number of training tokens eightfold can therefore require a substantially lower peak rate.
+
+Bjorck et al.~\cite{horizon} study this dependence over hundreds of controlled runs and propose an approximate power law. Their reported exponent near $-0.32$ means that multiplying the horizon by eight roughly halves the optimal learning rate. The exponent depends on the setting; in particular, their small models do not all follow exactly the same exponent. Width transfer with $\mu$P does not itself solve horizon transfer.
+
+\figpair{horizon_paper.png}{horizon_sweep.png}{Horizon-scaling results from the paper cited on P1:59 and the chess sweeps on P1:62. As the training horizon grows, the favorable learning-rate region moves left.}{horizon-sweeps}{}
+
+\subsection{Exercise 3d: fitting the horizon rule}
+Keep the batch size at 128. Train horizons ranging from 100,000 to 3.2 million games, and use matched WSD endpoints. For each horizon, fit the local minimum using Equation~\eqref{eq:lr-quadratic}. Then regress $\log\eta^*$ against $\log G$, where $G$ is the number of training games. The fitted relation is approximately
+\begin{equation}
+\boxed{\eta^*(G)\simeq 0.0156\left(\frac{G}{100{,}000}\right)^{-0.36}}.
+\label{eq:chess-horizon}
+\end{equation}
+The displayed uncertainty on the fitted exponent is about $0.02$. Doubling the horizon multiplies the recommended learning rate by $2^{-0.36}\simeq0.779$: a reduction of about 22\%. An eightfold increase gives $8^{-0.36}\simeq0.473$.
+
+\fig{horizon_fit.png}{P1:64: log--log fit of optimal learning rate against training horizon in the chess experiment. The fit estimates a trend within the measured range; it is not a guarantee of safe extrapolation to an arbitrary dataset.}{horizon-fit}
+
+The later compute-scaling exercise uses a nearby operational rule, $0.0113(G/100{,}000)^{-0.357}$, rather than exactly the normalization in Equation~\eqref{eq:chess-horizon}. Preserve this distinction when reproducing the slides: an empirical optimum estimate and a selected training recipe need not have identical intercepts.
+
+\subsection{Unique data versus repeated exposures}
+Repeating a dataset for a few epochs might initially produce gains similar to using more data, but this remains a hypothesis for these experiments. No controlled comparison here establishes a fixed safe number of repetitions. Distinguish the number of \emph{unique} tokens from the number of \emph{training exposures}. Repeated tokens still consume compute and updates, but their information value can diminish. A horizon rule fitted on fresh data does not automatically predict the best recipe for repeated data.
+
+\section{Connecting the small experiment to large-scale practice}
+\figstack{deepseek_heatmap.png}{deepseek_scaling.png}{P1:65: DeepSeek's joint exploration of learning rate, batch size, and compute. These empirical laws provide another example of tuning the recipe as scale changes.}{deepseek-scaling}{}
+
+The DeepSeek LLM report~\cite{deepseekllm} fits optimal batch size and learning rate against compute. The fitted powers are approximately $B\propto C^{0.3271}$ and $\eta\propto C^{-0.1250}$. The numeric prefactors depend on the units and definitions used in that study. It would be meaningless to insert FLOPs into a fitted expression whose $C$ was normalized differently.
+
+\takeaway{Tune learning rate and batch size together; measure seed variability; retune or transfer the learning rate when the horizon changes. A sensible small-scale optimum is the starting point for scaling, not the end of the problem.}
+\FloatBarrier

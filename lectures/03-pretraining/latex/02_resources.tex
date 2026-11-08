@@ -1,0 +1,79 @@
+\chapter{Accounting for compute, memory, and throughput}
+\source{P1:16--28}
+\section{Deriving the six-N-D rule}
+Consider $Y=WX$ with $W\in\R^{I\times J}$ and $X\in\R^{J\times D}$, where $D$ counts token positions in this multiplication. There are $N=IJ$ weights. Counting a multiplication and an addition as two FLOPs gives
+\begin{align}
+ C_{\rm forward}&\simeq2IJD,\\
+ \frac{\partial\loss}{\partial W}&=\frac{\partial\loss}{\partial Y}X^\top,
+ &C_{\rm weight\ gradient}&\simeq2IJD,\\
+ \frac{\partial\loss}{\partial X}&=W^\top\frac{\partial\loss}{\partial Y},
+ &C_{\rm input\ gradient}&\simeq2IJD.
+\end{align}
+Summing gives the familiar approximation
+\begin{equation}\boxed{C_{\rm train}\simeq6ND.}\label{eq:6nd}\end{equation}
+The same parameter is reused across many token positions, which is why both model size and token count enter multiplicatively. Optimizer arithmetic is usually smaller than the matrix-multiplication cost when each update processes many tokens.
+
+This estimate suppresses attention's token-token products, normalization, softmax, activation functions, communication, padding, and recomputation. For ordinary attention, the two main token-token products cost about $4bLs^2d$ FLOPs in a forward pass for batch $b$ and sequence length $s$. Their forward-and-backward cost is approximately $12bLs^2d$. Dividing by $bs$ gives about $12Lsd$ extra training FLOPs per token. Compared with the $72Ld^2$ block-projection estimate, the ratio is roughly $s/(6d)$. Long contexts can therefore invalidate an unqualified use of $6ND$.
+
+For an MoE model, active weights are a better starting point for arithmetic cost, while total weights govern storage. Routing, shared layers, attention, load imbalance, and communication still require separate treatment. $N$ is not a universally interchangeable number across architectures.
+
+\section{From FLOPs to wall-clock time}
+Let $P$ denote the peak FLOP/s of one accelerator in the relevant numerical format, $n$ the accelerator count, and $u$ model FLOPs utilization (MFU). Then
+\begin{equation}
+ t\simeq\frac{C_{\rm model}}{nPu},\qquad
+ u=\frac{C_{\rm model}}{t\,nP}.
+\end{equation}
+FLOPs is an operation count; FLOP/s is a rate. Keep this distinction explicit when checking units.
+
+The example on P1:23 is $N=3\times10^9$, $D=11\times10^{12}$ and $P=989\times10^{12}$ FLOP/s. Equation~\eqref{eq:6nd} gives $1.98\times10^{23}$ FLOPs, about 55,612 ideal GPU-hours. At 50\% MFU it becomes about 111,224 GPU-hours, or 12.1 days on 384 GPUs. The larger cost in the project table (Figure~\ref{fig:cost}) need not imply an error: real runs include different context lengths, attention work, inefficiencies, and interruptions. MFU must be computed using a consistent numerator, precision, and hardware specification.
+
+MFU counts useful model operations relative to peak. Hardware FLOPs utilization (HFU) can count additional executed arithmetic such as recomputation. A job can improve hardware occupancy while doing redundant work; the metrics answer different questions. End-to-end useful throughput also includes downtime and data-loading stalls.
+
+\section{Arithmetic intensity and the roofline picture}
+An accelerator has both a compute rate $P$ and a memory bandwidth $W$. If an operation performs $A$ FLOPs per byte transferred, a simplified roofline bound is
+\begin{equation}
+ P_{\rm achieved}\leq\min(P,WA).
+\end{equation}
+For a peak throughput of 989 TFLOP/s and a memory bandwidth of 3.35 TB/s, the crossover is near 295 FLOPs/byte. Large batched matrix multiplications reuse weights over many tokens and can exceed that intensity. Small operations, reductions, transfers, and communication may remain bandwidth- or latency-limited. Thus ``pretraining is compute-bound'' is a useful tendency for its large matrix multiplications, not a guarantee about every kernel or the entire job.
+
+\section{Where the memory goes}
+In a straightforward FP32 implementation of Adam, every parameter needs one value for the weight, one for its gradient, and two for the first and second moment estimates:
+\begin{equation}
+ M_{\rm persistent}\simeq4N+4N+4N+4N=16N\ \text{bytes}.
+\end{equation}
+For the approximately 0.8M-parameter chess model this is about 12.8 MB, consistent with the 13 MB baseline in P1:20. This estimate excludes activations, buffers, allocator reservations, framework overhead, and temporary optimizer allocations. Mixed precision changes the breakdown and may retain FP32 master weights and optimizer states.
+\fig{memory.png}{The memory lifecycle on P1:20, assuming Adam and FP32. Activations accumulate during the forward pass; backward frees many saved activations while materializing gradients. Persistent weights and optimizer moments remain. The actual peak depends on overlap, tensor lifetimes, and implementation.}{memory}
+
+Activations are intermediate values needed to differentiate the model. Their storage grows with microbatch size, sequence length, width, and depth. Naive attention additionally stores arrays of order $bHLs^2$. Memory-efficient attention and activation checkpointing modify these scalings. The PyTorch memory-visualization reference~\cite{pytorchmem} provides a way to inspect allocation lifetimes instead of inferring them from one aggregate number.
+
+\fig{memory_profile.png}{P1:21: an allocation timeline from the memory-profiling discussion. Such a trace reveals which tensors coexist at the peak and which allocations persist between steps. A single total-memory reading cannot reveal these lifetimes.}{memory-profile}
+
+\section{Exercise 1: measuring the device, not guessing}
+Measure memory and throughput over batch sizes from 1 to roughly 1,000 games. Several forward-and-backward passes are required: the first pass can initialize kernels, allocate optimizer states, or trigger compilation. On an asynchronous device, timings require synchronization before and after the measured region. Measure both a large matrix multiplication and the actual training step, because the former is an empirical upper bound rather than a prediction of application throughput.
+
+\figpair{batch_memory.png}{batch_throughput.png}{P1:26: memory consumption (left) and token throughput (right) versus microbatch size. The reported activation cost is about 12 MB per game, while weights, gradients, and Adam states account for only about 13 MB. Throughput initially rises, then saturates and fluctuates. The vertical throughput axis is thousands of tokens per second; this unit must be distinguished from games per second.}{batchhardware}{}
+
+The memory curve measures driver-allocated memory on Apple Silicon, which need not vary linearly with batch size. Allocation granularity and cached buffers create plateaus and jumps. Allocated, reserved, and peak live tensor memory are related but distinct quantities. The commands on P1:25 also refer to different accounting interfaces: CUDA's peak allocated memory and the MPS driver's allocated memory should not be assumed to measure exactly the same thing.
+
+The throughput curve identifies a useful \emph{hardware} range. Below saturation, a larger microbatch can use idle parallelism. Beyond saturation, additional memory may buy no speed. This says nothing yet about the \emph{statistically} best optimizer batch size; that question requires validation-loss experiments.
+
+\section{Microbatch, accumulation, and global batch}
+Let $b$ be the number of sequences in one microbatch, $K$ the accumulation count, and $n_{\rm dp}$ the number of data-parallel replicas. The global optimizer batch is
+\begin{equation}
+ B_{\rm seq}=bK n_{\rm dp},\qquad B_{\rm slots}=s bK n_{\rm dp}.
+\end{equation}
+The model weights stay fixed while gradients from $K$ microbatches are accumulated; then the optimizer steps once. Averaging gradients reproduces the corresponding full-batch gradient in exact arithmetic if weighting is correct and no batch-dependent operation changes the calculation. With variable valid-token counts, average by total valid tokens, not by an unweighted average of microbatch means. Floating-point order and stochastic layers can introduce small differences.
+
+\fig[0.91]{accumulation.png}{The accumulation timeline from P1:27. The small marks denote gradient accumulation; S denotes an optimizer step. Increasing accumulation changes the optimizer batch without requiring all activations to coexist in memory.}{accumulation}
+
+For a desired batch of 16,000 games when only 1,000 fit at once, use 16 microbatches. Gradient clipping should normally occur after accumulation and any precision unscaling. The learning-rate schedule advances per optimizer step unless deliberately defined in tokens; changing accumulation without updating schedule bookkeeping changes the experiment.
+
+\section{Width changes utilization}
+\fig[0.78]{width_mfu.png}{P1:28: measured MFU rises from roughly 29\% at width 64 to 64\% at width 512, at depth 4 and a batch of 128 games. The peak FLOP/s denominator is estimated on the Apple Silicon device used for this experiment. Larger models still require more time; they merely use the device more efficiently.}{widthmfu}
+Wider models generate larger matrix multiplications, which can reduce the fraction of time lost to launch overhead and improve hardware utilization. Consequently, optimality under a FLOP budget need not equal optimality under a wall-clock budget. A more expensive mathematical model can sometimes make better use of the hardware. All later scaling results should be interpreted with their chosen budget in mind.
+
+\section{Reading power laws}
+If $Y=cX^\alpha$, then $\log Y=\log c+\alpha\log X$. The slope of a log-log graph is $\alpha$, regardless of logarithm base. A straight segment is evidence for a power-law approximation over that range, not proof of an asymptotic law. If $Y=E+cX^{-\alpha}$, it is $\log(Y-E)$, not generally $\log Y$, that is exactly linear.
+\fig[0.77]{power_law.png}{The linear-axis and log-log illustrations on P1:24. Axis transformations expose multiplicative scaling, but offsets, limited ranges, and uncertain measurements still matter.}{powerlaw}
+\takeaway{Measure the actual training step. Keep stored parameters, active parameters, useful tokens, processed positions, model FLOPs, hardware FLOPs, and wall-clock time distinct. An efficiency metric is meaningful only with its accounting convention.}
+\FloatBarrier

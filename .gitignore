@@ -1,0 +1,23 @@
+# LaTeX build products
+*.aux
+*.bbl
+!main.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.synctex.gz
+*.nav
+*.snm
+*.vrb
+lectures/**/main.pdf
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+*.swp
+*~

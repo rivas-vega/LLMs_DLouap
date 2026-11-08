@@ -1,0 +1,126 @@
+\chapter{Selecting and preparing pretraining data}
+\label{ch:data}
+\source{P2:1--18}
+
+\section{The objective changes when the dataset changes}
+In the chess optimization experiments, a fixed validation distribution made loss an effective comparison metric. When choosing between datasets, the validation distribution itself can change. A corpus containing one repeated token is easy to predict and has low entropy, but is not a useful general-language training set.
+
+Formally, cross-entropy is
+\[
+H(p,q)=H(p)+D_{\rm KL}(p\Vert q).
+\]
+Changing the evaluation distribution $p$ changes its intrinsic entropy $H(p)$. Thus a lower loss on a different validation set need not imply a better model. Keep common evaluation sets and tokenization when comparing recipes, and supplement loss with downstream tasks.
+
+A base model can be evaluated without instruction tuning by comparing the likelihoods of candidate answers. Given a question $q$ and candidate answers $a_j$, score each continuation by
+\[
+s_j=\log p_\theta(a_j\mid q)
+=\sum_t\log p_\theta(a_{j,t}\mid q,a_{j,<t}),
+\qquad \hat j=\arg\max_j s_j.
+\]
+The model need not obey a conversational instruction: it only needs to assign probabilities to continuations. The evaluation protocol must specify the prompt, whether answer length is normalized, and whether calibration against an answer-only baseline is used. These choices can change the ranking, so use the same protocol for every dataset ablation.
+
+\section{From a web crawl to a training corpus}
+Common Crawl provides large web archives~\cite{commoncrawl}; it is a source pool, not a ready-made high-quality language-model dataset. The same page may appear in multiple crawl snapshots, and the raw material contains navigation, advertising, boilerplate, malformed pages, spam, and duplicates.
+
+\fig{fineweb_pipeline.png}{P2:4: the FineWeb preparation pipeline. Each stage changes both the quality and the composition of the remaining corpus.}{fineweb-pipeline}
+
+FineWeb~\cite{fineweb} is the main data-engineering reference in this section. Its experiments motivate careful extraction, filtering, and deduplication rather than assuming that more raw bytes automatically improve training. The published corpus contains about 15 trillion tokens from 96 Common Crawl snapshots. FineWeb-Edu is a selected educational subset built using model-assisted scoring.
+
+\fig{crawl_sizes.png}{P2:6: the crawl download interface and the very different sizes of available representations. The displayed snapshot is a historical example, not a current download-size guarantee.}{crawl-sizes}
+
+\section{Content filtering and text extraction}
+\subsection{Filter unwanted sources}
+URL blocklists, spam indicators, and content classifiers can remove sources that do not fit the intended corpus. These are policy and distribution choices as well as quality choices. A filter can preferentially remove a language variety, domain, or writing style. Inspect samples of both accepted and rejected material instead of judging a filter only by how much data it removes.
+
+\subsection{WARC and WET are different starting points}
+The WARC representation contains archived web responses, including HTML. WET contains extracted plain text. For the same page, WET looks more readable, but its generic extraction may retain irrelevant material or lose useful structure. Starting from WARC permits a purpose-built extraction pipeline.
+
+\figpair{warc.png}{wet.png}{P2:7--8: the same web content as raw HTML and extracted text. Visual cleanliness alone does not establish that the useful main content has been recovered correctly.}{warc-wet}{}
+
+Trafilatura~\cite{trafilatura} extracts main text and can preserve useful structure while suppressing page boilerplate. Extraction is an upstream modeling decision: no amount of optimizer tuning can recover passages discarded before tokenization.
+
+\subsection{Simple quality heuristics}
+The Gopher data discussion~\cite{gopher} illustrates filters on document length, mean word length, symbol fractions, repeated lines or paragraphs, and excessive bullet-point structure. These are cheap indicators of malformed or repetitive content. They are not definitions of intellectual quality. A table, source-code file, mathematical derivation, or short poem may violate a web-prose heuristic while remaining useful data.
+
+For a staged pipeline, log how many documents and tokens each filter removes and sample its decisions. Apply language-aware thresholds where needed. A filter tuned for English prose should not be assumed suitable for code or another writing system.
+
+\section{Deduplication: exact matches and near matches}
+\subsection{Exact deduplication}
+Comparing every pair of documents directly is prohibitively expensive. A hash maps each normalized document to a compact signature. Grouping identical hashes finds likely exact duplicates efficiently. A sufficiently large hash makes accidental collisions rare; an exact comparison can resolve them if needed. Normalization choices matter: deleting all punctuation can incorrectly merge distinct code or mathematical expressions.
+
+Exact matching misses a syndicated article with a different header or cookie banner. Near-duplicate detection instead compares the underlying content approximately.
+
+\subsection{MinHash, step by step}
+Split a tokenized document into overlapping shingles, such as five-word sequences. The sequence $w_1,\ldots,w_n$ gives shingles $(w_1,\ldots,w_5)$, $(w_2,\ldots,w_6)$, and so on. Represent the document by the \emph{set} of its shingles, $S$. For a hash function $h$, define
+\[
+m_h(S)=\min_{s\in S}h(s).
+\]
+Two nearly identical documents share many shingles, so they often share this minimum. But a single changed shingle may happen to hold the minimum; one signature is noisy.
+
+\fig{minhash.png}{P2:12: a numerical MinHash example. A local edit often preserves the minimum, but can change it; multiple independent signatures reduce this uncertainty.}{minhash}
+
+\extension{For an ideal random ordering of shingles, the probability of equal minima is exactly the Jaccard similarity:
+\begin{equation}
+\Pr[m_h(S)=m_h(T)]=J(S,T)
+=\frac{|S\cap T|}{|S\cup T|}.
+\end{equation}
+The smallest element of $S\cup T$ is equally likely to be any element of that union. The two minima agree precisely when that element lies in the intersection. With $K$ independent hashes, the fraction of agreeing minima estimates $J$, with standard error approximately $\sqrt{J(1-J)/K}$. Real hash families approximate this idealization.}
+
+Use multiple hash functions to estimate similarity, then apply a threshold to identify near duplicates. At web scale, comparing every pair of signatures would still be expensive. Locality-sensitive hashing groups signatures into $b$ bands of $r$ entries and retrieves pairs that match an entire band. Under the idealized independence model, a pair of similarity $J$ becomes a candidate with probability
+\begin{equation}
+P_{\rm candidate}(J)=1-(1-J^r)^b.
+\end{equation}
+FineWeb uses 112 signatures arranged as 14 bands of 8. This creates a smooth probability curve, not an exact similarity cutoff. Candidate grouping and the subsequent choice of which documents to retain are separate decisions.
+
+Deduplication can change the domain mixture and remove useful repetition as well as contamination. The FineWeb ablations show why aggressive global deduplication cannot simply be assumed better than all alternatives. Evaluate the downstream effect of the actual retained corpus.
+
+\section{Personal data and benchmark contamination}
+Data preparation should account for email addresses, IP addresses, crawl exclusions, and benchmark canary strings. Redaction can reduce obvious personal identifiers but is not a guarantee that all personal information has been removed. Conversely, pattern-based filters can alter harmless examples such as programming tutorials.
+
+A benchmark canary is a distinctive string inserted into benchmark material so corpus builders can detect it. Finding one provides strong evidence that benchmark content entered the source pool. Remove or quarantine the associated content according to the evaluation protocol. Absence of the string does not prove absence of contamination: copies, translations, reformatted questions, or answer discussions may omit it.
+
+For rigorous evaluation, preserve held-out sets, track provenance, and test for overlap beyond exact canary matching. Crawl permissions and benchmark notices are additional provenance and exclusion signals to preserve during collection.
+
+\section{Model-based filtering and educational quality}
+A classifier can assign each document a score for inclusion. The key question is where its labels come from. Two approaches are available: learn to distinguish reference sources such as Wikipedia or well-rated explanatory forum posts; or ask a language model to grade a sample, then train a cheaper classifier to imitate those judgments across the full corpus.
+
+This second procedure is a form of distillation. The expensive teacher supplies labels; the small classifier supplies scale. The score reflects the teacher, rubric, and sampled documents. It can reward a recognizable explanatory style while missing factual errors or excluding useful material that looks different. Check held-out human judgments and downstream ablations, not only agreement with the teacher.
+
+FineWeb-Edu applies this idea to educational value~\cite{fineweb}. The methodological lesson is to separate generating labels, fitting the scoring model, choosing the acceptance threshold, and testing the resulting training mixture. Each stage can introduce a different bias.
+
+\section{Rephrasing and synthetic pretraining text}
+Filtering discards data; rewriting tries to improve or diversify it. A generator can transform a web passage into an explanation, question-and-answer text, structured summary, or another format. The result must be assessed for factual preservation, coverage, diversity, and computational cost. Synthetic text can reproduce the generator's errors and style biases.
+
+Repeatedly replacing real data with model-generated samples can cause \emph{model collapse}. Shumailov et al.~\cite{collapse}, an additional reference, analyze how recursive generation can progressively lose the tails of the original distribution. This warning should not be strengthened into a universal theorem that every synthetic-data student must perform worse than its generator. Source-grounded rewriting, filtering, verification, and mixing with retained real data are materially different experimental settings.
+
+The FinePhrase study~\cite{finephrase}, cited on P2:15, compares prompt design, generator size, and source material. In its tested settings, structured formats such as tables, mathematical exposition, FAQs, and tutorials can be effective; larger generators are not automatically worth their extra cost. Its released synthetic corpus is about 486 billion tokens. The important proposal is systematic comparison of the \emph{generation recipe}, not a claim that any paraphrase improves any corpus.
+
+Nemotron-CC~\cite{nemotron} combines classifier-based selection and synthetic rewriting at much larger scale. It reports a 6.3-trillion-token corpus comprising about 4.4 trillion real and 1.9 trillion synthetic tokens. It treats aggressive heuristic removal as a quality--quantity tradeoff rather than an unquestionable preprocessing default. Both papers are useful examples of testing whether generated data actually improves a separately trained model.
+
+\section{Mixtures, midtraining, and context extension}
+\subsection{A data pool is not the training mixture}
+Let source $i$ contain $U_i$ available tokens, and let its chosen sampling share be $p_i$. A run of $D$ tokens consumes approximately $p_iD$ tokens from that source. Its effective number of exposures is
+\[
+e_i=\frac{p_iD}{U_i}.
+\]
+The source can be downsampled ($e_i<1$) or repeated ($e_i>1$). Thus ``the dataset has nine trillion tokens'' does not determine what a six-trillion-token run sees.
+
+\fig{data_mix_table.png}{P2:16: the Olmo 3 source pool and selected mixtures. For example, code and mathematics are upweighted relative to their raw availability. The table distinguishes token counts from document counts.}{data-mixture-table}
+\fig{data_mix_chart.png}{P2:16: the mixture visualization accompanying the table. Mixture proportions are part of the training recipe, not a passive consequence of collecting data.}{data-mixture-chart}
+
+To compare mixtures, use small controlled training runs with the same token and compute budgets, then evaluate domain-specific capabilities as well as an aggregate score. A change that improves mathematics while degrading multilingual coverage may or may not serve the intended model.
+
+\subsection{Midtraining}
+\emph{Midtraining} is a late pretraining phase that shifts the data mix toward valuable domains while retaining the language-model objective. This is distinct from instruction tuning or preference optimization. A smaller high-quality pool can have substantial influence late in training, but its repetitions and interactions with the learning-rate schedule must be monitored.
+
+\fig{midtraining_mix.png}{P2:17: the Olmo 3 midtraining mixture. The change in proportions is deliberate; it should be evaluated as a separate training stage.}{midtraining-mixture}
+
+\subsection{Long-context training}
+Increasing the supported context length requires more than changing a maximum-length field. Positional encoding, attention memory, sequence packing, and the availability of coherent long documents all matter. Randomly concatenated short documents do not automatically teach long-range reasoning over a single document.
+
+\fig{long_context_mix.png}{P2:18: Olmo 3's long-context mixture, extending the context from 8K to 64K. The selected 50-billion-token mixture retains about two-thirds shorter midtraining material alongside long-document sources.}{long-context-mixture}
+
+Olmo 3~\cite{olmo3} illustrates staged mixture design and a dedicated context-extension phase. The short-document share helps preserve existing capabilities, while long documents supply training signal at larger distances. Evaluate retrieval, multi-part reasoning, and ordinary short-context tasks after extension; successful processing of a long input is not itself evidence of effective use of distant information.
+
+\takeaway{Data preparation is a sequence of experimentally testable modeling choices. Compare mixtures on common evaluations, distinguish source-pool size from sampled exposures, and treat filtering and synthetic rewriting as hypotheses rather than automatic improvements.}
+\FloatBarrier

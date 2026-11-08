@@ -1,0 +1,145 @@
+\documentclass[11pt,a4paper,oneside]{report}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern,microtype}
+\usepackage[margin=25mm,headheight=15pt]{geometry}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{graphicx,booktabs,longtable,array,tabularx}
+\usepackage{caption,subcaption,float}
+\usepackage{xcolor,enumitem,fancyhdr}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{url}
+\usepackage[hidelinks,pdfencoding=auto,psdextra]{hyperref}
+\usepackage{bookmark}
+\graphicspath{{figures/}}
+\hypersetup{pdftitle={Lecture notes on pretraining},pdfauthor={Expanded study notes based on David Louapre's lecture},pdfsubject={Pretraining, optimization, scaling laws, data and efficiency}}
+\setlength{\parindent}{1.2em}
+\setlength{\parskip}{3pt}
+\setlength{\emergencystretch}{2em}
+\setcounter{tocdepth}{1}
+\setcounter{secnumdepth}{2}
+\setcounter{topnumber}{4}
+\setcounter{bottomnumber}{3}
+\setcounter{totalnumber}{6}
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.85}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.7}
+\setlist{itemsep=2pt,topsep=5pt}
+\captionsetup{font=small,labelfont=bf}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Lecture 3: Pretraining}
+\fancyhead[R]{\small David Louapre -- expanded notes}
+\fancyfoot[C]{\thepage}
+\renewcommand{\chaptermark}[1]{\markboth{\thechapter. #1}{}}
+\renewcommand{\headrulewidth}{0.3pt}
+\newcommand{\E}{\mathbb E}
+\newcommand{\R}{\mathbb R}
+\newcommand{\loss}{\mathcal L}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\FloatBarrier}{\clearpage}
+\newcommand{\source}[1]{\par\noindent{\small\textit{Lecture slides: #1.}}\par\medskip}
+\newcommand{\extension}[1]{\paragraph{Further explanation.}#1}
+\newcommand{\takeaway}[1]{\par\medskip\noindent\textbf{What to retain.} #1\par\medskip}
+\newcommand{\fig}[4][0.94]{\begin{figure}[!htbp]\centering\includegraphics[width=#1\linewidth,height=.64\textheight,keepaspectratio]{#2}\caption{#3}\label{fig:#4}\end{figure}}
+\newcommand{\figpair}[5]{\begin{figure}[!htbp]\centering\includegraphics[width=.485\linewidth,height=.38\textheight,keepaspectratio]{#1}\hfill\includegraphics[width=.485\linewidth,height=.38\textheight,keepaspectratio]{#2}\caption{#3}\label{fig:#4}\end{figure}}
+\newcommand{\figstack}[5]{\begin{figure}[!htbp]\centering\includegraphics[width=.94\linewidth,height=.33\textheight,keepaspectratio]{#1}\par\medskip\includegraphics[width=.94\linewidth,height=.33\textheight,keepaspectratio]{#2}\caption{#3}\label{fig:#4}\end{figure}}
+\begin{document}
+\begin{titlepage}
+\centering
+\vspace*{4.2cm}
+{\fontsize{30}{38}\selectfont\bfseries
+Lecture notes on\\[0.15cm]
+pretraining\par}
+\vfill
+\begin{minipage}{\textwidth}
+\hrule height 0.4pt
+\vspace{0.65cm}
+\noindent\begin{minipage}[t]{.40\linewidth}
+\raggedright
+{\small Lecture by\par}
+\vspace{0.22cm}
+{\normalsize\textbf{David Louapre}\par}
+\vspace{0.12cm}
+{\small Hugging Face\par}
+\end{minipage}\hfill
+\begin{minipage}[t]{.56\linewidth}
+\raggedleft
+{\small MVA\par}
+\vspace{0.22cm}
+{\normalsize Fundamentals of Large Language Models\par}
+\vspace{0.12cm}
+{\small Lecture 3\enspace\textbullet\enspace 2026\par}
+\end{minipage}\par
+\vspace{0.9cm}
+\centering
+{\footnotesize\color{black!60} Unofficial course notes\par}
+\end{minipage}
+\vspace*{0.8cm}
+\end{titlepage}
+\pagenumbering{roman}
+\chapter*{Preface}
+\addcontentsline{toc}{chapter}{Preface}
+Pretraining large language models requires allocating finite data, memory, compute, and time. Controlled experiments with small chess models establish the optimization and hyperparameter-transfer principles used to study scaling laws.
+
+These lecture notes cover pretraining in David Louapre's 2026 MVA course on large language models. They develop the course material through mathematical derivations, experimental analysis, and references to the research literature. The two slide decks contain 90 and 33 pages. References of the form \textbf{P1:25} mean page 25 of the first PDF, counted from the title page; \textbf{P2:4} means page 4 of the second.
+
+The exposition combines experimental results, mathematical derivations, and context from primary sources. Terminology and numerical claims are checked against slide equations, plots, and the cited research. Uncertain or conflicting claims are identified explicitly. Appendix~\ref{app:editorial} collects substantive clarifications and figure provenance.
+
+Figures retain the data and annotations of the original slides. Duplicate appearances are consolidated; paper title-page screenshots and code screenshots are replaced by bibliographic entries and explanations. Plot readings are approximate unless a value is printed explicitly. No experiment in the slides is claimed to have been rerun for these notes. Added derivations and qualifications are independent explanations.
+
+The exercises provide reproducible experimental protocols and the reported results. Their quoted durations depend on the original hardware and implementation. Research references were checked against primary sources available on 6 November 2026.
+
+\chapter*{Notation and conventions}
+\addcontentsline{toc}{chapter}{Notation and conventions}
+\begin{tabularx}{\linewidth}{lX}
+\toprule
+Symbol&Meaning and usual unit\\
+\midrule
+$N$&Parameter count; active, stored, or non-embedding counts are distinguished where needed.\\
+$d$, $L$&Transformer width and number of layers.\\
+$H$, $d_h$&Number of attention heads and dimension per head; $a$ is also used for head dimension in Chapter 1.\\
+$V$&Vocabulary size.\\
+$s$, $T$&Sequence length or number of positions in a sequence.\\
+$D$&Training-token horizon; real tokens and processed padded positions are distinguished.\\
+$G$&Number of chess games processed.\\
+$B$&Optimizer batch size, in sequences or tokens as specified; $b$ often denotes a microbatch.\\
+$C$&Training compute, in FLOPs.\\
+$P$, $u$&Peak hardware FLOP/s and model FLOPs utilization (MFU).\\
+$\theta$, $g$&Model parameters and their loss gradient.\\
+$\eta$, $\lambda$&Learning rate and the AdamW decay coefficient.\\
+$\beta_1$, $\beta_2$&Adam first- and second-moment averaging coefficients.\\
+$\loss$&Mean next-token cross-entropy, using natural logs unless specified.\\
+$E,A,B,\alpha,\beta$&Local coefficients in a fitted scaling-law loss surface; here $B$ is a coefficient, not batch size.\\
+\bottomrule
+\end{tabularx}
+
+\medskip
+Decimal prefixes are used for model and token counts: K denotes $10^3$, M denotes $10^6$, B denotes $10^9$, and T denotes $10^{12}$. Context lengths quoted as 8K or 64K follow the source's conventional labels and may denote powers of two in the implementation. Memory units depend on the profiler; MB and MiB are not interchangeable.
+
+FLOPs counts operations; FLOP/s measures a rate. A multiplication plus an addition counts as two FLOPs in the matrix-multiplication estimates used here. Plot labels and fitted coefficients retain the source's units. Numerical recommendations from the chess experiments are specific to that setting.
+
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+\input{01_foundations}
+\input{02_resources}
+\input{03_optimization}
+\input{04_schedules}
+\input{05_hyperparameters}
+\input{06_width}
+\input{07_scaling}
+\input{08_data}
+\input{09_monitoring}
+\input{10_efficiency}
+\input{11_practice}
+\appendix
+\input{12_editorial}
+\input{13_reading}
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{Bibliography}
+\bibliographystyle{plainnat}
+\bibliography{references}
+\end{document}

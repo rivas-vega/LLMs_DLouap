@@ -1,0 +1,114 @@
+\chapter{Numerical precision, memory, and parallel training}
+\label{ch:efficiency}
+\source{P2:24--33}
+
+The previous chapters ask how much useful learning we obtain per token or FLOP. This chapter asks how quickly and reliably the hardware performs that work. A theoretically efficient recipe can lose in wall-clock time if it underuses the accelerator or communicates too much.
+
+\section{Floating-point formats: range and precision}
+A normal binary floating-point value has the form
+\[
+x=(-1)^s 2^{e-b}(1.f),
+\]
+where $s$ is the sign, $e$ the stored exponent, $b$ its bias, and $f$ the fraction. Exponent bits primarily determine dynamic range; fraction bits primarily determine relative precision. Special values and subnormals require additional conventions.
+
+\fig{formats.png}{P2:25: bit allocations of common numerical formats. TF32 describes reduced-precision matrix arithmetic on compatible hardware; it is not an ordinary compact 19-bit tensor-storage type.}{number-formats}
+
+\begin{table}[htbp]\centering\small
+\begin{tabular}{lrrrl}
+\toprule
+Format&Sign&Exponent&Fraction&Main tradeoff\\
+\midrule
+FP32&1&8&23&Wide range and fine precision\\
+FP16&1&5&10&Finer precision than BF16, narrower range\\
+BF16&1&8&7&FP32-like exponent range, coarse precision\\
+FP8 E4M3&1&4&3&More precision, less range than E5M2\\
+FP8 E5M2&1&5&2&More range, less precision than E4M3\\
+FP4 E2M1&1&2&1&Very coarse; scaling is essential\\
+\bottomrule
+\end{tabular}
+\caption{Conceptual bit allocation. Exact encodings and supported operations depend on the format and hardware.}
+\end{table}
+
+Near 1, the spacing between representable normal values is approximately $2^{-p}$ for $p$ fraction bits. It is about $9.8\times10^{-4}$ in FP16 and $7.8\times10^{-3}$ in BF16. BF16 is less precise locally but is much less vulnerable to the narrow exponent range of FP16. This explains why range and precision must be discussed separately.
+
+The small memory footprint of a tensor does not imply that every operation on it should use the same arithmetic. Matrix multiplications can use low-precision inputs with higher-precision accumulation. Reductions, optimizer states, normalization, and losses can retain more precision.
+
+\section{Mixed precision and why master weights matter}
+The mixed-precision training paper~\cite{mixed} combines low-precision arithmetic with safeguards such as higher-precision master weights, accumulation, and loss scaling. Consider a weight around 1 and a proposed update of $10^{-5}$. Rounding the updated value immediately into BF16 can erase that update. Maintaining a more precise master copy lets small updates accumulate before casting a working copy for the next forward pass.
+
+\fig{mixed_precision.png}{P2:26: mixed-precision data flow. Distinguish the precision of stored weights, matrix-multiplication inputs, accumulation, gradients, and optimizer states.}{mixed-precision}
+
+For FP16, multiplying the loss by a scale $s$ also multiplies its gradients by $s$, helping small values remain representable. Gradients are divided by $s$ before clipping and updating. Dynamic scaling lowers $s$ after overflow and skips invalid updates. BF16's wider exponent range often makes this particular mechanism unnecessary, although it does not eliminate rounding error or all possible overflows.
+
+The ``single PyTorch line'' in P2:27 refers to autocasting eligible operations inside a context such as \texttt{torch.autocast}. It does not turn an arbitrary model and optimizer into a fully engineered low-precision training system. The chess loop also casts logits to float for the loss. Actual memory use depends on parameter storage, optimizer implementation, and temporary buffers; simply halving one tensor's bit width does not halve total training memory.
+
+\section{FP8: scale each tensor appropriately}
+FP8 has so few bits that dynamic range must be allocated carefully. A common conceptual operation is
+\[
+q=\operatorname{round}_{\rm FP8}(x/s),\qquad \widetilde x=sq.
+\]
+Choose $s$ too large and small values lose precision; choose it too small and large values saturate. One scale for an entire tensor can be inefficient if a few outliers determine the range. Smaller groups can fit local ranges better, at the cost of scale metadata and more involved kernels.
+
+The FP8 formats paper~\cite{fp8} discusses E4M3 and E5M2 as complementary precision/range choices. Their roles are implementation-dependent; ``FP8 training'' is not one universal format assignment.
+
+\fig{fp8_pipeline.png}{P2:28: the DeepSeek-V3 precision pipeline. Sensitive operations retain higher precision while expensive matrix multiplications use appropriately scaled FP8 inputs.}{fp8-pipeline}
+
+DeepSeek-V3~\cite{deepseekv3} uses fine-grained E4M3 quantization, including activation groups of $1\times128$ and weight blocks of $128\times128$, together with higher-precision accumulation and selected higher-precision operations. Its proposal is a coordinated numerical system. Copying only the low-precision dtype omits the mechanisms that make the recipe work.
+
+\extension{A practical precision ablation should compare short runs from identical starting states, monitor layerwise overflow and update statistics, and evaluate loss differences at matched tokens. Faster matrix multiplication is useful only if the numerical changes do not require substantially more training or destabilize the run.}
+
+\section{Activation recomputation}
+Backpropagation needs intermediate activations. Storing every layer's intermediates can dominate memory, especially for long sequences. Activation checkpointing stores selected boundaries, then recomputes missing intermediate values during the backward pass. It exchanges extra computation for lower peak memory.
+
+\figpair{recompute_without.png}{recompute_with.png}{P2:30: the effect of recomputation for long sequences. The comparison illustrates the memory--compute tradeoff; the best operating point depends on the actual implementation and sequence length.}{recomputation}{}
+
+For a simple chain of $L$ equally sized layers, save a boundary every $k$ layers. The rough activation-storage requirement becomes proportional to
+\[
+\frac{L}{k}+k.
+\]
+The first term counts saved boundaries; the second counts a temporarily recomputed segment. Choosing $k\approx\sqrt L$ gives an $O(\sqrt L)$ rather than $O(L)$ scaling in this simplified model. Chen et al.~\cite{checkpoint} develop sublinear-memory training strategies along these lines. Real transformer layers have heterogeneous intermediates, so the simple formula is an intuition, not an exact memory estimate.
+
+Selective recomputation~\cite{selective} avoids treating every operation equally. Recomputing a cheap elementwise operation may save considerable activation memory, whereas recomputing an expensive matrix multiplication may be unattractive. The cited work combines selective recomputation with sequence parallelism to reduce memory and redundant computation in large transformers.
+
+Recomputation can improve \emph{end-to-end} speed despite adding FLOPs if the saved memory enables a better microbatch, less offloading, or fewer communication stalls. It can also lower MFU when MFU counts only useful model FLOPs, even if the hardware is busy with recomputation. Always state the numerator of the utilization metric.
+
+\section{Three basic forms of parallelism}
+\subsection{Data parallelism}
+Each worker holds a replica and processes a different portion of the batch. Gradients are combined before the update, typically by an all-reduce. The global batch is
+\[
+B_{\rm global}=B_{\rm micro}\times n_{\rm accumulation}\times n_{\rm replicas}.
+\]
+If valid-token counts differ between workers, aggregate loss sums and token counts consistently; averaging local means can otherwise weight workers incorrectly. Data parallelism increases throughput but does not by itself make one replica's model fit in memory. Sharding optimizer states, gradients, or parameters is an additional technique.
+
+\subsection{Pipeline parallelism}
+Assign consecutive groups of layers to different devices. Activations and their gradients cross stage boundaries. Multiple microbatches keep stages occupied, but startup and drain periods create pipeline bubbles. For an idealized balanced pipeline with $p$ stages and $m$ microbatches, a rough bubble fraction is $(p-1)/(m+p-1)$. Real schedules, imbalance, and communication alter this estimate.
+
+\subsection{Tensor parallelism}
+Partition a large layer's tensors across devices. For example, split output columns of a matrix multiplication and combine outputs when subsequent operations require them. This lets a single layer use multiple devices but introduces frequent communication inside the model. Fast interconnects and careful placement are crucial.
+
+\begin{table}[htbp]\centering\small
+\begin{tabularx}{\linewidth}{lXX}
+\toprule
+Method&What is partitioned?&Typical constraint\\
+\midrule
+Data parallel&Batch examples&Gradient synchronization; replica memory\\
+Pipeline parallel&Layer groups&Bubbles and stage imbalance\\
+Tensor parallel&Operations within layers&Frequent high-bandwidth communication\\
+\bottomrule
+\end{tabularx}
+\caption{The three forms named in P2:31. Large systems combine them and may add sequence/context parallelism, expert parallelism, and state sharding.}
+\end{table}
+
+The Ultra-Scale Playbook~\cite{ultrascale} develops these tradeoffs in practical detail. The right decomposition depends on the model, sequence length, batch size, available memory, and network topology. It is not determined by parameter count alone.
+
+\section{Mistral Large 4: a closing synthesis}
+Mistral Large 4 has 1 trillion total parameters and 52 billion active parameters. Its training used 3,840 GB200 GPUs, about 4.15 million GPU-hours over 45 days, and 36\% MFU (P2:32). Active and total parameters play different roles for a mixture-of-experts model: compute follows the selected computation, while storage must accommodate the full model.
+
+The technical report~\cite{mistral4} confirms the hardware, duration, MFU, and AdamW betas $(0.975,0.975)$. It specifies a 40M--80M--160M token batch schedule, whereas the slide abbreviates this as 50M$\to$160M. The reported 65\%/35\% split denotes successive training phases, with the later phase emphasizing higher-quality and STEM data; it is not a two-source mixture ratio. The 28T-token total comes from P2:32 and is not independently confirmed here.
+
+Using that slide-reported token count gives 28 tokens per \emph{total} parameter but about 538 per \emph{active} parameter. Neither ratio alone transfers the dense-model Chinchilla rule to a mixture-of-experts architecture. Its statistical capacity, active computation, routing, and full parameter storage need separate accounting.
+
+The report predicts batch size and learning rate from scale-dependent variables and validates the recipe on a ladder of smaller runs. Its MFU uses peak BF16 throughput and excludes recomputation. Those conventions matter when comparing percentages across systems.
+
+\takeaway{Optimize useful learning per unit of wall-clock time. Numerical precision, memory savings, batch size, communication, and stability interact; an isolated improvement in FLOPs or throughput is not enough.}
+\FloatBarrier

@@ -1,0 +1,210 @@
+\begin{thebibliography}{34}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Bai et~al.(2025)]{adamspikes}
+Zhiwei Bai et~al.
+\newblock Adaptive preconditioners trigger loss spikes in adam.
+\newblock \emph{arXiv:2506.04805}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2506.04805}.
+
+\bibitem[Barbaresi(2021)]{trafilatura}
+Adrien Barbaresi.
+\newblock Trafilatura: A web scraping library and command-line tool for text discovery and extraction.
+\newblock In \emph{ACL System Demonstrations}, pages 122--131, 2021.
+\newblock URL \url{https://aclanthology.org/2021.acl-demo.15/}.
+
+\bibitem[Ben~Allal et~al.(2025)]{smol}
+Loubna Ben~Allal et~al.
+\newblock The smol training playbook: The secrets to building world-class llms.
+\newblock Hugging Face, 2025.
+\newblock URL \url{https://huggingfacetb-smol-training-playbook.hf.space/}.
+
+\bibitem[Bjorck et~al.(2025)Bjorck, Benhaim, Chaudhary, Wei, and Song]{horizon}
+Johan Bjorck, Alon Benhaim, Vishrav Chaudhary, Furu Wei, and Xia Song.
+\newblock Scaling optimal lr across token horizons.
+\newblock \emph{ICLR}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2409.19913}.
+
+\bibitem[Chen et~al.(2016)Chen, Xu, Zhang, and Guestrin]{checkpoint}
+Tianqi Chen, Bing Xu, Chiyuan Zhang, and Carlos Guestrin.
+\newblock Training deep nets with sublinear memory cost.
+\newblock \emph{arXiv:1604.06174}, 2016.
+\newblock URL \url{https://arxiv.org/abs/1604.06174}.
+
+\bibitem[{Common Crawl}(2026)]{commoncrawl}
+{Common Crawl}.
+\newblock Get started: Crawl archives and data formats, 2026.
+\newblock URL \url{https://commoncrawl.org/get-started}.
+
+\bibitem[D'Angelo et~al.(2024)D'Angelo, Andriushchenko, Varre, and Flammarion]{whywd}
+Francesco D'Angelo, Maksym Andriushchenko, Aditya Varre, and Nicolas Flammarion.
+\newblock Why do we need weight decay in modern deep learning?
+\newblock \emph{NeurIPS}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2310.04415}.
+
+\bibitem[{DeepSeek-AI} et~al.(2024{\natexlab{a}})]{deepseekllm}
+{DeepSeek-AI} et~al.
+\newblock Deepseek llm: Scaling open-source language models with longtermism.
+\newblock \emph{arXiv:2401.02954}, 2024{\natexlab{a}}.
+\newblock URL \url{https://arxiv.org/abs/2401.02954}.
+
+\bibitem[{DeepSeek-AI} et~al.(2024{\natexlab{b}})]{deepseekv3}
+{DeepSeek-AI} et~al.
+\newblock Deepseek-v3 technical report.
+\newblock \emph{arXiv:2412.19437}, 2024{\natexlab{b}}.
+\newblock URL \url{https://arxiv.org/abs/2412.19437}.
+
+\bibitem[Defazio(2025)]{gradtail}
+Aaron Defazio.
+\newblock Why gradients rapidly increase near the end of training.
+\newblock \emph{arXiv:2506.02285}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2506.02285}.
+
+\bibitem[Hoffmann et~al.(2022)]{chinchilla}
+Jordan Hoffmann et~al.
+\newblock Training compute-optimal large language models.
+\newblock \emph{NeurIPS}, 2022.
+\newblock URL \url{https://arxiv.org/abs/2203.15556}.
+
+\bibitem[{Hugging Face Nanotron Team}(2025)]{ultrascale}
+{Hugging Face Nanotron Team}.
+\newblock The ultra-scale playbook: Training llms on gpu clusters, 2025.
+\newblock URL \url{https://nanotron-ultrascale-playbook.static.hf.space/index.html}.
+
+\bibitem[Kaplan et~al.(2020)]{kaplan}
+Jared Kaplan et~al.
+\newblock Scaling laws for neural language models.
+\newblock \emph{arXiv:2001.08361}, 2020.
+\newblock URL \url{https://arxiv.org/abs/2001.08361}.
+
+\bibitem[Kingma and Ba(2015)]{adam}
+Diederik~P. Kingma and Jimmy Ba.
+\newblock Adam: A method for stochastic optimization.
+\newblock \emph{ICLR}, 2015.
+\newblock URL \url{https://arxiv.org/abs/1412.6980}.
+
+\bibitem[Korthikanti et~al.(2022)]{selective}
+Vijay Korthikanti et~al.
+\newblock Reducing activation recomputation in large transformer models.
+\newblock \emph{arXiv:2205.05198}, 2022.
+\newblock URL \url{https://arxiv.org/abs/2205.05198}.
+
+\bibitem[Loshchilov and Hutter(2019)]{adamw}
+Ilya Loshchilov and Frank Hutter.
+\newblock Decoupled weight decay regularization.
+\newblock \emph{ICLR}, 2019.
+\newblock URL \url{https://arxiv.org/abs/1711.05101}.
+
+\bibitem[{Marin Community}(2026)]{marinscale}
+{Marin Community}.
+\newblock Scaling laws that extrapolate 300 times past the fit, 2026.
+\newblock URL \url{https://marin.community/blog/2026/05/11/delphi/}.
+
+\bibitem[{Marin Community}(n.d.)]{marinspikes}
+{Marin Community}.
+\newblock Marin 32b retrospective, n.d.
+\newblock URL \url{https://github.com/marin-community/marin/blob/main/docs/reports/marin-32b-retro.md}.
+\newblock Accessed 6 November 2026.
+
+\bibitem[McCandlish et~al.(2018)McCandlish, Kaplan, Amodei, and {OpenAI Dota Team}]{largebatch}
+Sam McCandlish, Jared Kaplan, Dario Amodei, and {OpenAI Dota Team}.
+\newblock An empirical model of large-batch training.
+\newblock \emph{arXiv:1812.06162}, 2018.
+\newblock URL \url{https://arxiv.org/abs/1812.06162}.
+
+\bibitem[Micikevicius et~al.(2018)]{mixed}
+Paulius Micikevicius et~al.
+\newblock Mixed precision training.
+\newblock \emph{ICLR}, 2018.
+\newblock URL \url{https://arxiv.org/abs/1710.03740}.
+
+\bibitem[Micikevicius et~al.(2022)]{fp8}
+Paulius Micikevicius et~al.
+\newblock Fp8 formats for deep learning.
+\newblock \emph{arXiv:2209.05433}, 2022.
+\newblock URL \url{https://arxiv.org/abs/2209.05433}.
+
+\bibitem[{Microsoft Research}(2022)]{mupcode}
+{Microsoft Research}.
+\newblock Maximal update parametrization: Reference implementation, 2022.
+\newblock URL \url{https://github.com/microsoft/mup}.
+
+\bibitem[{Mistral AI}(2026)]{mistral4}
+{Mistral AI}.
+\newblock Mistral large 4.
+\newblock Technical report, Mistral AI, 2026.
+\newblock URL \url{https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/resolve/main/assets/technical_report.pdf}.
+
+\bibitem[Niklaus et~al.(2026)]{finephrase}
+Joel Niklaus et~al.
+\newblock How can we synthesize high-quality pretraining data? a systematic study of prompt design, generator model, and source data.
+\newblock \emph{arXiv:2604.13977}, 2026.
+\newblock URL \url{https://arxiv.org/abs/2604.13977}.
+
+\bibitem[{Olmo Team} et~al.(2025)]{olmo3}
+{Olmo Team} et~al.
+\newblock Olmo 3.
+\newblock \emph{arXiv:2512.13961}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2512.13961}.
+\newblock Revised April 2026.
+
+\bibitem[Penedo et~al.(2024)]{fineweb}
+Guilherme Penedo et~al.
+\newblock The fineweb datasets: Decanting the web for the finest text data at scale.
+\newblock \emph{arXiv:2406.17557}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2406.17557}.
+
+\bibitem[Porian et~al.(2024)Porian, Wortsman, Jitsev, Schmidt, and Carmon]{discrepancy}
+Tomer Porian, Mitchell Wortsman, Jenia Jitsev, Ludwig Schmidt, and Yair Carmon.
+\newblock Resolving discrepancies in compute-optimal scaling of language models.
+\newblock \emph{NeurIPS}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2406.19146}.
+
+\bibitem[Rae et~al.(2021)]{gopher}
+Jack~W. Rae et~al.
+\newblock Scaling language models: Methods, analysis and insights from training gopher.
+\newblock \emph{arXiv:2112.11446}, 2021.
+\newblock URL \url{https://arxiv.org/abs/2112.11446}.
+
+\bibitem[Shi and DeVito(2023)]{pytorchmem}
+Aaron Shi and Zachary DeVito.
+\newblock Understanding gpu memory 1: Visualizing all allocations over time.
+\newblock PyTorch, 2023.
+\newblock URL \url{https://pytorch.org/blog/understanding-gpu-memory-1/}.
+
+\bibitem[Shumailov et~al.(2023)Shumailov, Shumaylov, Zhao, Gal, Papernot, and Anderson]{collapse}
+Ilia Shumailov, Zakhar Shumaylov, Yiren Zhao, Yarin Gal, Nicolas Papernot, and Ross Anderson.
+\newblock The curse of recursion: Training on generated data makes models forget.
+\newblock \emph{arXiv:2305.17493}, 2023.
+\newblock URL \url{https://arxiv.org/abs/2305.17493}.
+\newblock Revised April 2024; additional reading.
+
+\bibitem[Su et~al.(2024)]{nemotron}
+Dan Su et~al.
+\newblock Nemotron-cc: Transforming common crawl into a refined long-horizon pretraining dataset.
+\newblock \emph{arXiv:2412.02595}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2412.02595}.
+
+\bibitem[{Team OLMo} et~al.(2025)]{olmo2}
+{Team OLMo} et~al.
+\newblock 2 olmo 2 furious.
+\newblock \emph{arXiv:2501.00656}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2501.00656}.
+
+\bibitem[Wang and Aitchison(2025)]{wdscale}
+Xi~Wang and Laurence Aitchison.
+\newblock How to set adamw's weight decay as you scale model and dataset size.
+\newblock \emph{ICML}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2405.13698}.
+
+\bibitem[Yang et~al.(2022)]{mup}
+Greg Yang et~al.
+\newblock Tensor programs v: Tuning large neural networks via zero-shot hyperparameter transfer.
+\newblock \emph{arXiv:2203.03466}, 2022.
+\newblock URL \url{https://arxiv.org/abs/2203.03466}.
+
+\end{thebibliography}

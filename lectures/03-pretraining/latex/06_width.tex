@@ -1,0 +1,51 @@
+\chapter{Transferring a recipe to wider models}
+\label{ch:width}
+\source{P1:67--73}
+
+Retuning a large model by an exhaustive search is expensive. The goal is to discover a rule on a cheap model and transfer it to a wider one.
+
+\section{The empirical problem with standard parameterization}
+Keep four transformer layers and vary the embedding width $d$. With standard parameterization, the best learning rate decreases as width grows. Since the dominant parameter count scales approximately as $Ld^2$, a doubling of width roughly quadruples parameters at fixed depth.
+
+\figpair{width_sweep.png}{width_fit.png}{P1:67--68: wider models require smaller learning rates in this standard-parameterization experiment. The fitted exponent printed on P1:68 is about $-1.58$.}{width-standard}{}
+
+This small sweep supports a local empirical trend, not a precise universal law. P1:68 gives a fitted exponent near $-1.58$, while P1:70 gives a value near $-1.34$. Both support the qualitative trend. They do not justify reporting a uniquely measured exponent without qualification.
+
+\section{Why width changes the meaning of a parameter update}
+Consider one component of a linear layer:
+\[
+y_i=\sum_{j=1}^{d}W_{ij}x_j,
+\qquad
+\Delta y_i=\sum_{j=1}^{d}\Delta W_{ij}x_j.
+\]
+An Adam update can have a coordinate scale of order $\eta$, because its numerator is divided by an estimate of its root-mean-square magnitude. If update contributions add coherently, the resulting feature change can scale like $d\eta$. Keeping a feature change of order one then suggests $\eta\propto d^{-1}$.
+
+This argument provides intuition rather than a complete proof. If terms were independent and centered, their sum would scale differently, like $\sqrt d$ in standard deviation. Learned updates are correlated with activations and gradients, so independence is generally the wrong assumption. A valid theory must track those correlations, initialization scales, forward activations, backward signals, and the output layer together.
+
+\section{What maximal update parameterization proposes}
+The Tensor Programs V paper~\cite{mup} develops \emph{maximal update parameterization}, written $\mu$P, to preserve nontrivial feature learning as width grows. Its practical payoff is often called \emph{$\mu$Transfer}: tune a base learning rate at small width, then reuse it with prescribed parameter-group scaling at larger width.
+
+For width-only scaling with Adam, the operational intuition is:
+\begin{itemize}
+\item scale learning rates for hidden weight matrices inversely with the width multiplier;
+\item treat vector-like parameters, such as normalization gains, differently;
+\item use the appropriate embedding and readout conventions;
+\item keep initialization and forward-pass scaling consistent with the chosen parameterization.
+\end{itemize}
+Rescale weight decay for matrices to preserve the decay timescale. If a particular parameter group's learning rate becomes $\eta/r$, choosing its decay coefficient as $r\lambda$ preserves the product $\eta\lambda$. This is a statement about an AdamW implementation that multiplies decay by learning rate; optimizer conventions must be checked.
+
+\extension{The rule ``divide every learning rate by width'' is not $\mu$P. Different tensors have different width-dependent dimensions. The reference implementation~\cite{mupcode} records base and target shapes and provides a compatible readout layer, initialization, and optimizer handling. A correct implementation needs that full specification. The simplified recipe above is therefore specific to this model family.}
+
+\figstack{mup_paper.png}{mup_coordinates.png}{P1:71--72: the transfer idea and a coordinate check. Coordinate checks test whether activation scales remain controlled as width changes; they do not by themselves establish optimal validation loss.}{mup-theory}{}
+
+\section{How to validate transfer experimentally}
+Before an expensive run, compare several widths using the same \emph{base} learning-rate grid. Under successful transfer, the curves can move downward as model capacity improves while their minima remain near the same horizontal coordinate.
+
+\fig{mup_sweeps.png}{P1:73: chess experiments after width-dependent rescaling. The optimal base learning rates approximately align, making a small-model sweep useful for wider models.}{mup-chess}
+
+Two different checks are useful. A \emph{coordinate check} measures forward activations or feature changes across widths for a small number of steps. It catches scaling errors before a long run. A \emph{transfer check} measures final loss across learning rates and widths. It tests the desired practical result. Passing one does not imply passing the other.
+
+Keep the scope of the claim narrow. Changing depth, attention conventions, optimizer, batch size, sequence length, or data distribution can require additional rules or a new calibration. In particular, $\mu$P addresses width dependence; the horizon dependence established in the preceding chapter remains a separate issue.
+
+\takeaway{Learning rates depend on parameterization. Transferring small-model tuning to larger models requires compatible width scaling, initialization, readouts, and parameter groups.}
+\FloatBarrier

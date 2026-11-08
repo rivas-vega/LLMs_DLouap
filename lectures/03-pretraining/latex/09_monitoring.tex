@@ -1,0 +1,46 @@
+\chapter{Monitoring a run and investigating instability}
+\label{ch:monitoring}
+\source{P1:48 and P2:19--23}
+
+\section{Read several signals together}
+A scalar loss curve is an incomplete description of a training run. Plot loss, learning rate, and gradient norm on aligned horizontal axes to distinguish a scheduled change, an isolated difficult batch, and an instability that changes the subsequent trajectory.
+
+\fig{run_anatomy.png}{P2:20, revisiting P1:48: the anatomy of chess runs at different learning rates. Compare the timing of loss changes with gradient behavior and the schedule instead of interpreting each plot independently.}{run-anatomy}
+
+A useful record includes training loss, fixed-set validation loss, learning rate, pre-clipping gradient norm, the fraction of steps clipped, parameter and update norms, throughput, memory, and the data source of each batch. For attention instability, also inspect query/key magnitudes and attention-logit extremes. For mixed precision, record non-finite values and any skipped optimizer updates. These measurements answer different questions and should not be reduced to one dashboard number.
+
+Training loss is a noisy batch measurement; validation loss is a sample estimate on a held-out distribution. A temporary training spike that immediately recovers may have little effect on the latter. Conversely, a run can remain numerically finite while becoming systematically worse than a healthy continuation.
+
+\section{A rising gradient norm need not mean divergence}
+The chess plots show gradient-norm changes near the final decay. The paper by Defazio~\cite{gradtail} studies a mechanism involving weight decay and normalized layers. For a scale-invariant function, changing a weight vector's magnitude need not change its output, while its gradient scale can change inversely. Shrinking weights can therefore increase the raw gradient norm without a corresponding deterioration in predictions.
+
+The paper proposes an AdamC modification that couples the decay coefficient to the current learning rate in its setting: $\lambda_t=\lambda\eta_t/\eta_{\max}$. With the AdamW convention, the shrinkage term then scales as $\eta_t^2\lambda/\eta_{\max}$. This is a proposed intervention for the studied mechanism, not a reason to adopt it indiscriminately or to ignore genuinely unstable gradients.
+
+\extension{A normalized gradient magnitude, a parameter-update ratio such as $\norm{\Delta\theta}/\norm{\theta}$, and validation loss can give a more meaningful picture than raw gradient norm alone. Layerwise measurements are particularly useful because a global norm can hide which tensor is changing.}
+
+\section{OLMo: stability involves data, architecture, and optimization}
+\fig{olmo_stability.png}{P2:21: OLMo versus OLMo 2. The newer run has far fewer loss and gradient spikes. Its higher absolute training loss cannot be read as worse quality because the underlying data distribution changed.}{olmo-stability}
+
+The OLMo 2 report~\cite{olmo2} investigates stability through several ablations. Highly repeated short token patterns are one data-related source of spikes. The report also studies initialization, normalization placement, RMSNorm, query/key normalization, a logit-related auxiliary loss, and AdamW settings. The evidence supports a multi-cause view: filtering a pathological pattern can help without explaining every remaining incident.
+
+Query/key normalization acts before the attention dot product. If $Q$ and $K$ grow in magnitude, the logits $QK^\top/\sqrt{d_h}$ can become extreme and the softmax highly concentrated. Controlling their scales can improve numerical and optimization behavior, but also changes the model's parameterization. It should be evaluated as an architectural choice, not inserted into a saved model without a recovery plan.
+
+\section{Marin: a recoverable spike and a damaged trajectory}
+The screenshots in the slides come from David Leo Wright Hall's report \emph{Marin 32B Spike Fixing}. They distinguish frequent transient excursions from a smaller-looking spike that leaves the model on a worse trajectory. The height of the spike alone is therefore a poor severity measure.
+
+\fig{marin_overview.png}{P2:22: the overall Marin loss trajectory, with many transient spikes. Continued improvement between them motivated investigating their lasting effect rather than stopping solely because a spike occurred.}{marin-overview}
+\figpair{marin_spike.png}{marin_bad_spike.png}{P2:22--23: a recoverable spike (left) and a persistent deterioration (right). The vertical ranges are similar; the worse incident need not have the largest instantaneous peak.}{marin-spike}{}
+
+The Marin 32B retrospective~\cite{marinspikes} documents instability around 70,000--80,000 steps. Several recovery attempts preceded a switch to a Qwen3-style backbone with query/key normalization, warm-started from an existing checkpoint. The report describes an initial disruption followed by recovery and improved stability. Even a large ongoing run can require a carefully tested architectural intervention.
+
+\fig{marin_recovery.png}{P2:23: the reported intervention and recovery. The original figure is retained as a case study, not a universal prescription for repairing all loss spikes.}{marin-recovery}
+
+\section{A disciplined diagnostic procedure}
+First locate the onset precisely and preserve the last healthy checkpoint, its optimizer state, and its data position. Check whether the event coincides with a data-source change, unusually repetitive input, a schedule transition, a software change, or a hardware failure. Confirm that the metric itself has not changed.
+
+Next compare short controlled continuations from the same checkpoint. One can replay the suspect batches, change their order, reduce the learning rate, inspect moment statistics, or test a targeted architecture or precision change. Change one factor at a time when feasible. A restart that happens to recover does not establish what caused the original failure.
+
+Finally assess the recovered run on the same held-out data and against a healthy baseline. Do not judge recovery solely by returning to the numerical loss observed before a change in data mix. Document discarded compute and the exact continuation procedure so the final model's training history remains interpretable.
+
+\takeaway{Spikes are symptoms. Diagnose them using data provenance, optimizer dynamics, precision, and architecture together; a falling loss and finite numbers are necessary but insufficient evidence of a healthy run.}
+\FloatBarrier

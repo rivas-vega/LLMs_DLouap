@@ -1,0 +1,61 @@
+\chapter{Reproducing the experimental logic}
+\label{ch:practice}
+
+\section{The complete sequence}
+Separate experimental questions before combining them. The following sequence provides a practical plan for developing and validating a pretraining recipe.
+
+\begin{enumerate}
+\item \textbf{Establish a correct small baseline.} Verify causal masking, the one-token input/target shift, padding masks, and the held-out split. Check that the model can reduce loss on a tiny batch before a large sweep.
+\item \textbf{Measure the hardware.} For a fixed model, vary microbatch size and record peak memory and tokens per second after warmup. Synchronize accelerator timing. Identify a useful throughput region and implement any required accumulation.
+\item \textbf{Compare schedules at matched endpoints.} Run the cosine and WSD exercise with the same number of training examples. Branch a saved stable-phase state into shorter cooldowns and verify that optimizer state is restored.
+\item \textbf{Locate the learning-rate basin.} Use a geometric sweep at 100,000 games. Inspect trajectories as well as final validation loss; repeat useful settings across seeds.
+\item \textbf{Tune batch size jointly.} Retune the learning rate for each batch. Plot loss against games, updates, and elapsed time. Select a global batch that balances statistical and hardware efficiency.
+\item \textbf{Fit horizon transfer.} Repeat learning-rate sweeps at several horizons. Fit local minima, then the log--log trend. Reserve at least one horizon to test the fitted rule.
+\item \textbf{Validate width transfer.} Check parameter-group scaling and activation behavior, then verify alignment of base-learning-rate optima across widths.
+\item \textbf{Construct isoFLOP curves.} At each budget, choose several model sizes and set their token horizons consistently. Ensure the observed minimum lies within the sweep.
+\item \textbf{Forecast before scaling.} Fit the loss surface, record the next run's predicted loss and uncertainty, then perform the larger run. Report both successes and discrepancies.
+\end{enumerate}
+
+\section{What to save for every run}
+A useful experiment record contains the model configuration; parameter counts and their convention; tokenizer and vocabulary; dataset version, split, mixture and order; real and padded token counts; optimizer equations and parameter groups; global batch, microbatch and accumulation; complete schedule; seed; precision; hardware; elapsed time; and code/configuration version. Save both final and best-checkpoint evaluation rules so that comparisons do not silently select different endpoints.
+
+For a scaling fit, retain individual observations rather than only a plot. Record the uncertainty from seeds, the chosen fitting range, the loss metric, and whether coefficients use raw counts or millions. An apparent disagreement of several orders of magnitude can be a unit mismatch.
+
+\section{Worked checks}
+\subsection{Token accounting and optimizer steps}
+At batch size 128 and padded length 256, a full batch contains 32,768 positions. If a game contributes 135 real tokens on average, it contains about 17,280 loss-bearing tokens instead. For 100,000 games there are approximately $100{,}000/128=781.25$ batches; the actual number of updates depends on whether the last partial batch is kept. There are 25.6 million padded positions and about 13.5 million real tokens. None of these quantities should be substituted for another without explanation.
+
+\subsection{Gradient accumulation}
+Four equal-sized microbatches of 32 games give a global batch of 128 on one device. Divide each microbatch loss by four before backpropagating if the microbatch losses are comparable means. If they contain unequal numbers of valid tokens, instead weight by valid-token counts so the accumulated gradient corresponds to the intended token-average objective. Update Adam's moments once per global batch, not after every microbatch.
+
+\subsection{Transferring the horizon rule}
+Using Equation~\eqref{eq:chess-horizon}, a horizon of 800,000 games gives
+\[
+\eta^*=0.0156\times8^{-0.36}\simeq0.00738.
+\]
+This is the fitted small-model rule. Width-dependent parameter groups still require their own scaling. The later operational normalization in Equation~\eqref{eq:scaling-recipe} would give a different numerical rate; choose the recipe deliberately.
+
+\subsection{Compute-optimal chess allocation}
+With the simplified rule $D=65N$ and proxy budget $C=10^{16}$,
+\[
+N\simeq\sqrt{\frac{10^{16}}{6\times65}}\simeq5.06\ \text{million},
+\qquad D\simeq329\ \text{million real tokens}.
+\]
+At 135 real tokens per game, this is about 2.44 million games. It is close to, but not identical with, the separately fitted slide values because those use varying fitted ratios and rounded coefficients.
+
+\subsection{Interpreting a small loss improvement}
+For natural-log cross-entropy, perplexity is $\exp(\loss)$. A loss reduction from 0.916 to 0.904 changes perplexity by a multiplicative factor $e^{-0.012}\simeq0.9881$, about a 1.2\% reduction. This is a token-prediction measure; it does not directly translate into a percentage improvement in chess-playing strength or a downstream benchmark.
+
+\section{Questions for self-assessment}
+\begin{enumerate}
+\item Why does $6ND$ omit some attention and padding costs? Which quantities would you measure to compare it with wall-clock time?
+\item Why is $L_2$ regularization equivalent to weight decay for plain SGD but not for Adam?
+\item Why does WSD allow one stable trajectory to serve several endpoints, and which state must be saved for the branches?
+\item Why is an apparently optimal learning rate at one horizon insufficient for a scaling experiment?
+\item What does the Chinchilla ratio optimize, and why might a deployed model rationally use many more tokens per parameter?
+\item Why can a data filter lower training loss while reducing the usefulness of the final model?
+\item What information would distinguish a harmless gradient-norm increase from an unstable parameter trajectory?
+\item Under what circumstances could activation recomputation make a run faster despite adding computation?
+\end{enumerate}
+
+Answers are developed in Chapters 2--10. The common thread is to specify what is fixed, what changes, and what quantity is being optimized before interpreting an experiment.

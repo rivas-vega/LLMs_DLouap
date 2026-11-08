@@ -1,0 +1,107 @@
+\chapter{A guide to the research and technical references}
+\label{app:reading}
+
+This guide summarizes the contributions of the cited references. The main chapters explain the mechanisms and experiments; the entries below suggest what to look for when reading the original source. References explicitly added to deepen the handout are marked as such. Blogs, software documentation, and technical reports are distinguished from research papers.
+
+\section{Optimization and hyperparameter transfer}
+\paragraph{Adam --- Kingma and Ba~\cite{adam}.}
+The proposal is an adaptive optimizer combining first- and second-moment estimates with initialization-bias correction. Read its update equations beside Chapter 3. The useful question is how an apparently scalar learning rate interacts with coordinatewise preconditioning and the history of gradients.
+
+\paragraph{AdamW --- Loshchilov and Hutter~\cite{adamw}.}
+The paper separates weight decay from the adaptive gradient transform. Its central distinction is algebraic: adding an $L_2$ penalty to Adam's gradient is not the same operation as shrinking parameters independently. This is the foundation for interpreting the AdamW decay coefficient.
+
+\paragraph{Adaptive preconditioners and loss spikes --- Bai et al.~\cite{adamspikes}.}
+The proposal explains a class of spikes through mismatched second-moment dynamics and preconditioned curvature. Read the simplified stability analysis before the larger-network experiments. It supplies a mechanism to test, rather than a diagnosis that can be inferred from any jagged curve.
+
+\paragraph{Why weight decay? --- D'Angelo et al.~\cite{whywd}.}
+The paper examines optimization-based explanations for decay beyond the conventional overfitting account. Compare its training regimes with nearly single-pass language modeling. Ask which assumptions would change when a curated source is repeated many times in a data mixture.
+
+\paragraph{Scaling AdamW decay --- Wang and Aitchison~\cite{wdscale}.}
+The proposal reparameterizes decay using an EMA timescale and investigates its transfer across model and dataset sizes. Re-derive the update with the correct sign in Chapter 3, then distinguish a timescale in updates from one in epochs. This is essential when batch size changes.
+
+\paragraph{Late gradient growth --- Defazio~\cite{gradtail}.}
+The paper links a late-training rise in gradient norm to decay and normalized parameters and proposes AdamC. Its relevance is diagnostic: raw gradient magnitude is not an invariant measure of the size of a functional model change. Check whether the mechanism's assumptions fit the layer under investigation.
+
+\paragraph{Large-batch training --- McCandlish et al.~\cite{largebatch}.}
+The proposal uses gradient noise to explain the diminishing benefit of larger batches. Compare the paper's data-efficiency and step-efficiency views with the paired chess plots in Chapter 5. A practical exercise is to estimate how the useful batch changes during a run rather than searching for one universal value.
+
+\paragraph{Token-horizon transfer --- Bjorck et al.~\cite{horizon}.}
+The study fits how the best learning rate changes with the number of training tokens. Its contribution fills a gap left by model-size transfer. Read the measured variation between settings before turning the approximate exponent into a default recipe; the chess exponent is a separate empirical result.
+
+\paragraph{Tensor Programs V and $\mu$P --- Yang et al.~\cite{mup}.}
+The proposal makes width-dependent initialization and updates compatible with feature learning and hyperparameter transfer. The inverse-width argument in Chapter 6 is an entry point, not the full derivation. Use the reference implementation~\cite{mupcode} to see how base shapes, readouts, initialization, and parameter groups fit together.
+
+\section{Scaling and large-run recipes}
+\paragraph{Kaplan scaling laws~\cite{kaplan}.}
+The paper establishes empirical regularities linking language-model loss to model size, data, and compute. Its allocation result motivates the later debate. Read its stopping and optimization conventions as carefully as the fitted exponents: a scaling curve includes the training procedure used to generate it.
+
+\paragraph{Chinchilla --- Hoffmann et al.~\cite{chinchilla}.}
+The proposal allocates a fixed training budget more evenly between parameters and tokens. Compare its efficient-envelope, isoFLOP, and parametric-loss approaches. Chapter 7 derives why a balanced allocation arises when the two loss exponents are close, and why the token ratio is setting-dependent.
+
+\paragraph{Resolving scaling discrepancies --- Porian et al.~\cite{discrepancy}.}
+The study revisits why Kaplan and Chinchilla disagree, controlling compute accounting and optimization details. Its results motivate tuning before scaling. A poor small-run recipe can produce a systematic, rather than random, forecasting error.
+
+\paragraph{DeepSeek LLM~\cite{deepseekllm}.}
+This technical report connects scaling experiments to a complete model-training recipe. It includes alternative learning-rate schedules and empirical batch/rate scaling. Read the units and fixed settings attached to each fitted expression before attempting to reuse its coefficients.
+
+\paragraph{Marin's extrapolation report~\cite{marinscale}.}
+This is a primary engineering/research blog, not a conventional conference paper. It illustrates making predictions beyond the fitted compute range. The useful comparison with the chess experiment is the separation between fitting, committing to a forecast, and evaluating the later run.
+
+\paragraph{Mistral Large 4 technical report~\cite{mistral4}.}
+This report provides an industrial example of pretraining at scale. Read the scaling-ladder and training sections together: the hardware-efficient implementation and the transferred statistical recipe are jointly responsible for the result. Chapter 10 records the differences between the slide shorthand and the report.
+
+\section{Data sources, curation, and mixtures}
+\paragraph{FineWeb and FineWeb-Edu --- Penedo et al.~\cite{fineweb}.}
+The core proposal is an empirically tested web-data pipeline. Read its ablations alongside the processing diagram in Chapter 8, and ask what each stage changes in the remaining distribution. The educational subset illustrates model-assisted selection rather than simple URL-based filtering.
+
+\paragraph{Common Crawl~\cite{commoncrawl}.}
+This is infrastructure documentation, not a modeling paper. Use it to understand the archive representations and their intended contents. The WARC/WET comparison in Chapter 8 shows why selecting a download format is already a consequential extraction choice.
+
+\paragraph{Trafilatura --- Barbaresi~\cite{trafilatura}.}
+This system-demonstration paper presents a tool for discovering and extracting web text. The tool converts raw page archives into useful content. Evaluate extraction on representative pages from the intended domains, including failure cases.
+
+\paragraph{Gopher --- Rae et al.~\cite{gopher}.}
+The report provides the data-quality heuristics used in Chapter 8. Read those heuristics as operational choices in a specific pipeline, not as general definitions of valuable language. They provide a useful baseline against which model-based filtering can be tested.
+
+\paragraph{FinePhrase --- Niklaus et al.~\cite{finephrase}.}
+The proposal systematically compares synthetic rephrasing choices and releases the resulting dataset. The questions to carry into a reproduction are whether the chosen output format preserves information, whether generator cost is justified, and whether gains survive a change in the real-data mixture.
+
+\paragraph{Nemotron-CC --- Su et al.~\cite{nemotron}.}
+The report combines filtering and synthetic transformation for long-horizon pretraining. It is a complementary example to FineWeb: alternative choices about selection, retention, and rewriting can be tested by training downstream models rather than by inspecting text alone.
+
+\paragraph{OLMo 2~\cite{olmo2}.}
+This open-model report supplies the stability comparison in Chapter 9 as well as a broader training recipe. The pretraining-stability section is the most relevant reading here. Its multiple ablations are a useful antidote to searching for one explanation for every loss spike.
+
+\paragraph{Olmo 3~\cite{olmo3}.}
+The report details pretraining, midtraining, and long-context mixtures. Read the tables by separating available source pools from sampled training tokens. The key question is how a stage's objective and source availability determine the chosen proportions and repetition rates.
+
+\paragraph{Model collapse --- Shumailov et al.~\cite{collapse} (additional reading).}
+This reference analyzes the risk of model collapse from recursively generated data. Read the data-replacement assumptions carefully. Its setting should be distinguished from a single round of source-grounded rewriting mixed with retained real data, as discussed in Chapter 8.
+
+\section{Numerics, memory, and systems}
+\paragraph{Mixed precision --- Micikevicius et al.~\cite{mixed}.}
+The proposal uses low-precision computation while retaining selected higher-precision state and safeguards. Track the dtype of each object through the diagram in Chapter 10. ``The model uses FP16'' is too imprecise to specify a training implementation.
+
+\paragraph{FP8 formats --- Micikevicius et al.~\cite{fp8}.}
+The paper proposes complementary eight-bit formats and studies their use in deep learning. The relevant distinction is dynamic range versus precision. Understand both before interpreting a claim that one format is better for a given tensor.
+
+\paragraph{DeepSeek-V3~\cite{deepseekv3}.}
+The FP8 training system is the relevant contribution for Chapter 10. Read the quantization-group and accumulation choices together with the higher-precision exceptions. The numerical design is more informative than the headline bit width.
+
+\paragraph{Sublinear-memory training --- Chen et al.~\cite{checkpoint}.}
+The proposal trades recomputation for activation storage. Chapter 10 derives the simple checkpoint-spacing intuition. Compare that chain model with the heterogeneous cost of attention, matrix multiplications, and elementwise operations in a transformer.
+
+\paragraph{Selective recomputation --- Korthikanti et al.~\cite{selective}.}
+The paper combines selective activation recomputation with sequence parallelism. Its useful systems principle is to avoid recomputing expensive intermediates indiscriminately. Evaluate both memory savings and the resulting throughput at the batch size those savings permit.
+
+\paragraph{Marin 32B retrospective~\cite{marinspikes}.}
+This primary engineering report documents a run's incidents and interventions. The value is the causal sequence and the failed recovery attempts, not just the successful final configuration. It complements the more controlled stability analyses.
+
+\paragraph{The Smol Training Playbook~\cite{smol}.}
+This practitioner reference organizes the end-to-end process of developing a training recipe. It is useful for placing small, controlled experiments in a larger model-development workflow.
+
+\paragraph{The Ultra-Scale Playbook~\cite{ultrascale}.}
+This systems guide develops the memory, communication, and parallelism tradeoffs introduced in Chapter 10. Use it after the three-way comparison in Chapter 10 to study how those forms of parallelism are combined on real clusters.
+
+\paragraph{PyTorch GPU-memory visualization~\cite{pytorchmem}.}
+This primary software article explains inspecting allocations over time. It is the practical continuation of Exercise 1: identify what actually occupies memory rather than inferring the peak solely from parameter count.
